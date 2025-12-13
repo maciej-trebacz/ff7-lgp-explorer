@@ -15,7 +15,9 @@ function App() {
   const [status, setStatus] = useState('Ready');
   const [searchQuery, setSearchQuery] = useState('');
   const [quickLookFile, setQuickLookFile] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
   const lastSelectedIndex = useRef(null);
+  const dragCounter = useRef(0);
 
   const fileInputRef = useRef(null);
   const replaceInputRef = useRef(null);
@@ -368,11 +370,79 @@ function App() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [selectedIndices, quickLookFile, openQuickLook]);
 
+  // Drag & drop handlers
+  const handleDragEnter = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current++;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDragging(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current--;
+    if (dragCounter.current === 0) {
+      setIsDragging(false);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback(async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    dragCounter.current = 0;
+
+    const droppedFiles = e.dataTransfer.files;
+    if (!droppedFiles || droppedFiles.length === 0) return;
+
+    const file = droppedFiles[0];
+    if (!file.name.toLowerCase().endsWith('.lgp')) {
+      setStatus('Please drop an LGP file');
+      return;
+    }
+
+    setStatus(`Loading ${file.name}...`);
+    try {
+      const buffer = await file.arrayBuffer();
+      const archive = new LGP(buffer);
+      setLgp(archive);
+      setArchiveName(file.name);
+      setCurrentPath('');
+      setSelectedIndices(new Set());
+      setSearchQuery('');
+      setStatus(`Loaded ${file.name}`);
+    } catch (err) {
+      setStatus(`Error: ${err.message}`);
+    }
+  }, []);
+
   // Build breadcrumb
   const breadcrumbParts = currentPath ? currentPath.split('/').filter(Boolean) : [];
 
   return (
-    <div className="app">
+    <div 
+      className="app"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {isDragging && (
+        <div className="drop-overlay">
+          <div className="drop-overlay-content">
+            <div className="drop-overlay-icon">📦</div>
+            <div className="drop-overlay-text">Drop LGP file to open</div>
+          </div>
+        </div>
+      )}
       <Toolbar
         onOpen={handleOpen}
         onSave={handleSave}
@@ -424,7 +494,7 @@ function App() {
         ) : (
           <div className="empty-state">
             <div className="empty-state-icon">📦</div>
-            <div className="empty-state-text">Open an LGP archive to get started</div>
+            <div className="empty-state-text">Open or drag & drop an LGP archive</div>
           </div>
         )}
       </div>
