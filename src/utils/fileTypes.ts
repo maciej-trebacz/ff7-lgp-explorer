@@ -1,59 +1,48 @@
 const extensionMap: Record<string, string> = {
-  // Textures
-  tex: 'Texture',
-  tga: 'Texture',
-  png: 'Texture',
-  bmp: 'Texture',
-  jpg: 'Texture',
-  jpeg: 'Texture',
-  
-  // Images
-  tim: 'Image',
-  
-  // Models
+  tex: 'TEX Image',
+  tut: 'Tutorial Script',
   p: 'Model',
   hrc: 'Skeleton',
   rsd: 'Resource',
-  
-  // Animations
   a: 'Animation',
   da: 'Animation',
-  
-  // Audio
-  wav: 'Audio',
-  mid: 'MIDI',
-  ogg: 'Audio',
-  mp3: 'Audio',
-  
-  // Video
-  avi: 'Video',
-  
-  // Scripts/Data
-  bin: 'Binary',
-  dat: 'Data',
-  lzs: 'Compressed',
-  
-  // Text
-  txt: 'Text',
-  ini: 'Config',
-  cfg: 'Config',
-  
-  // FF7 specific
-  lgp: 'Archive',
 };
 
 const filenamePatterns: [RegExp, string][] = [
-  [/^[a-z]{4}\.bin$/i, 'Field Script'],
-  [/^[a-z]{4}$/i, 'Field'],
-  [/^world.*\.lgp$/i, 'World Archive'],
-  [/^battle.*\.lgp$/i, 'Battle Archive'],
-  [/^magic.*\.lgp$/i, 'Magic Archive'],
+  [/^[a-z0-9_]+$/i, 'Field'],
 ];
+
+// 4-letter battle files: first 2 letters identify the model, last 2 determine type
+function getBattleFileType(filename: string): string | null {
+  if (!/^[a-z]{4}$/i.test(filename)) return null;
+  
+  const suffix = filename.slice(2, 4).toLowerCase();
+  
+  if (suffix === 'aa') return 'Battle Skeleton';
+  if (suffix === 'ab') return 'Battle (unknown)';
+  if (suffix >= 'ac' && suffix <= 'al') return 'TEX Image';
+  if (suffix === 'da') return 'Battle Animation';
+  if ((suffix >= 'am' && suffix <= 'az') || (suffix >= 'ba' && suffix <= 'bz')) return 'Battle Model';
+  
+  return null;
+}
+
+export function isBattleTexFile(filename: string): boolean {
+  if (!/^[a-z]{4}$/i.test(filename)) return false;
+  const suffix = filename.slice(2, 4).toLowerCase();
+  return suffix >= 'ac' && suffix <= 'al';
+}
 
 export function getFileType(filename: string): string {
   const lower = filename.toLowerCase();
   
-  // Check filename patterns first
+  if (filename.startsWith('maplist')) return 'Map List';
+
+  // Check 4-letter battle file patterns first
+  const battleType = getBattleFileType(lower);
+  if (battleType) return battleType;
+  
+  // Check filename patterns
   for (const [pattern, type] of filenamePatterns) {
     if (pattern.test(lower)) {
       return type;

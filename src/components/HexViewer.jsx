@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import './HexViewer.css';
 
@@ -6,8 +6,27 @@ const COLUMN_OPTIONS = [16, 24, 32];
 const VIEW_TYPES = ['Hex', 'Plaintext'];
 
 export function HexViewer({ data, columns, onColumnsChange }) {
-  const [viewType, setViewType] = useState('Hex');
   const parentRef = useRef(null);
+
+  // Auto-detect if content is likely plaintext by checking first 100 bytes
+  const isLikelyText = useMemo(() => {
+    const checkLength = Math.min(100, data.length);
+    for (let i = 0; i < checkLength; i++) {
+      const byte = data[i];
+      // Printable ASCII (32-126), tab (9), LF (10), CR (13)
+      if (!((byte >= 32 && byte < 127) || byte === 9 || byte === 10 || byte === 13)) {
+        return false;
+      }
+    }
+    return checkLength > 0;
+  }, [data]);
+
+  const [viewType, setViewType] = useState(isLikelyText ? 'Plaintext' : 'Hex');
+
+  // Reset view type when opening a different file
+  useEffect(() => {
+    setViewType(isLikelyText ? 'Plaintext' : 'Hex');
+  }, [data, isLikelyText]);
 
   const rows = useMemo(() => {
     const result = [];
@@ -26,6 +45,10 @@ export function HexViewer({ data, columns, onColumnsChange }) {
       const byte = data[i];
       if (byte >= 32 && byte < 127) {
         text += String.fromCharCode(byte);
+      } else if (byte === 13 && data[i + 1] === 10) {
+        // CRLF (0D 0A) - treat as single line break
+        text += '\n';
+        i++;
       } else if (byte === 10 || byte === 13) {
         text += '\n';
       } else {

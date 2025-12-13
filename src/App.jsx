@@ -26,6 +26,9 @@ function App() {
   const insertInputRef = useRef(null);
   const fileListRef = useRef(null);
   const searchInputRef = useRef(null);
+  const pendingSelectionIndex = useRef(null);
+  const typeaheadBuffer = useRef('');
+  const typeaheadTimeout = useRef(null);
 
   // Build folder structure and file list from archive
   // archiveVersion is used to trigger re-computation when archive is modified
@@ -279,19 +282,44 @@ function App() {
   const handleRemove = useCallback(() => {
     if (!lgp || selectedIndices.size === 0) return;
     
-    const selectedFiles = files.filter(f => selectedIndices.has(f.tocIndex));
-    let removed = 0;
+    // Get file items (non-folders) in display order
+    const fileItems = displayFiles.filter(f => !f.isFolder);
+    const selectedFiles = fileItems.filter(f => selectedIndices.has(f.tocIndex));
+    
+    if (selectedFiles.length === 0) return;
+    
+    // Find the position of the first selected file
+    // After deletion, the file below will slide up to this position
+    const firstSelectedIdx = Math.min(...selectedFiles.map(f => fileItems.indexOf(f)));
+    
+    // Store the target index for selection after re-render
+    pendingSelectionIndex.current = firstSelectedIdx;
     
     for (const file of selectedFiles) {
-      if (lgp.removeFile(file.filename)) {
-        removed++;
-      }
+      lgp.removeFile(file.filename);
     }
     
+    // Clear selection temporarily - will be restored by useEffect after re-render
     setSelectedIndices(new Set());
-    setStatus(`Removed ${removed} file(s)`);
+    setStatus(`Removed ${selectedFiles.length} file(s)`);
     setArchiveVersion(v => v + 1);
-  }, [lgp, files, selectedIndices]);
+  }, [lgp, displayFiles, selectedIndices]);
+  
+  // Apply pending selection after archive changes and re-render
+  useEffect(() => {
+    if (pendingSelectionIndex.current !== null) {
+      const targetIndex = pendingSelectionIndex.current;
+      pendingSelectionIndex.current = null;
+      
+      const fileItems = displayFiles.filter(f => !f.isFolder);
+      if (fileItems.length > 0 && targetIndex >= 0) {
+        const index = Math.min(targetIndex, fileItems.length - 1);
+        const targetFile = fileItems[index];
+        setSelectedIndices(new Set([targetFile.tocIndex]));
+        lastSelectedIndex.current = targetFile.tocIndex;
+      }
+    }
+  }, [archiveVersion, displayFiles]);
 
   const handleSelect = useCallback((index, modifiers) => {
     setSelectedIndices(prev => {
@@ -466,6 +494,42 @@ function App() {
         const displayIndex = displayFiles.findIndex(f => f.tocIndex === fileItems[newIndex].tocIndex);
         if (displayIndex >= 0 && fileListRef.current) {
           fileListRef.current.scrollToIndex(displayIndex + (currentPath ? 1 : 0));
+        }
+        return;
+      }
+      
+      // Type-ahead file selection
+      if (lgp && e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const char = e.key.toLowerCase();
+        
+        // Clear existing timeout and set new one
+        if (typeaheadTimeout.current) {
+          clearTimeout(typeaheadTimeout.current);
+        }
+        typeaheadTimeout.current = setTimeout(() => {
+          typeaheadBuffer.current = '';
+        }, 500);
+        
+        // Append character to buffer
+        typeaheadBuffer.current += char;
+        const searchStr = typeaheadBuffer.current;
+        
+        // Search for matching file
+        const fileItems = displayFiles.filter(f => !f.isFolder);
+        const matchIndex = fileItems.findIndex(f => 
+          f.filename.toLowerCase().startsWith(searchStr)
+        );
+        
+        if (matchIndex !== -1) {
+          const matchedFile = fileItems[matchIndex];
+          setSelectedIndices(new Set([matchedFile.tocIndex]));
+          lastSelectedIndex.current = matchedFile.tocIndex;
+          
+          // Scroll to the matched file
+          const displayIndex = displayFiles.findIndex(f => f.tocIndex === matchedFile.tocIndex);
+          if (displayIndex >= 0 && fileListRef.current) {
+            fileListRef.current.scrollToIndex(displayIndex + (currentPath ? 1 : 0));
+          }
         }
       }
     };

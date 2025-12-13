@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { HexViewer } from './HexViewer.jsx';
 import { TexPreview } from './TexPreview.jsx';
-import { formatFileSize } from '../utils/fileTypes.ts';
+import { formatFileSize, isBattleTexFile } from '../utils/fileTypes.ts';
 import './QuickLook.css';
 
 const HEX_COLUMN_WIDTHS = {
@@ -11,7 +11,7 @@ const HEX_COLUMN_WIDTHS = {
 };
 
 export function QuickLook({ filename, data, onClose }) {
-  const isTexFile = filename.toLowerCase().endsWith('.tex');
+  const isTexFile = filename.toLowerCase().endsWith('.tex') || isBattleTexFile(filename);
   const [hexColumns, setHexColumns] = useState(16);
 
   const modalWidth = useMemo(() => {
