@@ -5,7 +5,7 @@ import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUti
 import { SkeletonFile } from '../skeleton.ts';
 import { PFile } from '../pfile.ts';
 import { TexFile } from '../texfile.ts';
-import { BattleAnimation } from '../battleAnimFile.ts';
+import { BattleAnimationPack } from '../battleAnimFile.ts';
 import './SkeletonPreview.css';
 
 export function SkeletonPreview({ data, filename, onLoadFile }) {
@@ -13,8 +13,10 @@ export function SkeletonPreview({ data, filename, onLoadFile }) {
     const [loadedParts, setLoadedParts] = useState(null);
     const [loadedTextures, setLoadedTextures] = useState(null);
     const [loadedBoneModels, setLoadedBoneModels] = useState(null);
-    const [loadedAnimation, setLoadedAnimation] = useState(null);
+    const [loadedWeaponModels, setLoadedWeaponModels] = useState(null);
+    const [loadedAnimationPack, setLoadedAnimationPack] = useState(null);
     const [loadingStatus, setLoadingStatus] = useState('');
+    const [selectedWeaponIndex, setSelectedWeaponIndex] = useState(0);
 
     const { skeleton, stats, relatedFiles, error } = useMemo(() => {
         try {
@@ -161,22 +163,52 @@ export function SkeletonPreview({ data, filename, onLoadFile }) {
             }
 
             setLoadedBoneModels(boneModels);
+
+            // Load weapon models if this skeleton has weapons (??CK, ??CL, etc.)
+            const weaponModels = [];
+            const nWeapons = skeleton.model.header.nWeapons;
+            if (nWeapons > 0) {
+                setLoadingStatus('Loading weapons...');
+                for (let i = 0; i < nWeapons; i++) {
+                    const weaponSuffix = String.fromCharCode('K'.charCodeAt(0) + i);
+                    const weaponName = `${base}C${weaponSuffix}`;
+                    const weaponData = onLoadFile(weaponName);
+                    if (weaponData) {
+                        try {
+                            const pfile = new PFile(weaponData);
+                            weaponModels.push({ name: weaponName, pfile, index: i });
+                        } catch {
+                            weaponModels.push({ name: weaponName, pfile: null, index: i });
+                        }
+                    } else {
+                        weaponModels.push({ name: weaponName, pfile: null, index: i });
+                    }
+                }
+            }
+            setLoadedWeaponModels(weaponModels);
+
             setLoadingStatus('Loading animation...');
 
-            // Try to load first animation (XXDA)
+            // Try to load animation pack (XXDA) with skeleton and weapon animations
             const animName = `${base}DA`;
             const animData = onLoadFile(animName);
             if (animData) {
                 try {
-                    const anim = new BattleAnimation(animData, bones.length);
-                    setLoadedAnimation(anim);
+                    const animPack = new BattleAnimationPack(
+                        animData,
+                        bones.length,
+                        skeleton.model.header.nsSkeletonAnims,
+                        skeleton.model.header.nsWeaponsAnims
+                    );
+                    setLoadedAnimationPack(animPack);
                 } catch {
-                    setLoadedAnimation(null);
+                    setLoadedAnimationPack(null);
                 }
             }
 
             const loadedCount = boneModels.filter(b => b.pfile).length;
-            setLoadingStatus(`Loaded ${loadedCount} bone models, ${textures.filter(t => t).length} textures`);
+            const weaponCount = weaponModels.filter(w => w.pfile).length;
+            setLoadingStatus(`Loaded ${loadedCount} bone models, ${weaponCount} weapons, ${textures.filter(t => t).length} textures`);
         };
 
         loadBoneData();
@@ -262,9 +294,11 @@ export function SkeletonPreview({ data, filename, onLoadFile }) {
                 skeleton.model.bones,
                 loadedBoneModels,
                 loadedTextures || [],
-                loadedAnimation
+                loadedAnimationPack,
+                loadedWeaponModels || [],
+                selectedWeaponIndex
             );
-            
+
             result.meshes.forEach(mesh => {
                 scene.add(mesh);
                 meshesToDispose.push(mesh);
@@ -315,7 +349,7 @@ export function SkeletonPreview({ data, filename, onLoadFile }) {
                 container.removeChild(renderer.domElement);
             }
         };
-    }, [skeleton, loadedParts, loadedTextures, loadedBoneModels, loadedAnimation]);
+    }, [skeleton, loadedParts, loadedTextures, loadedBoneModels, loadedWeaponModels, loadedAnimationPack, selectedWeaponIndex]);
 
     if (error) {
         return (
@@ -409,6 +443,22 @@ export function SkeletonPreview({ data, filename, onLoadFile }) {
                                         <span className="stat-label">Weapon Anims</span>
                                         <span className="stat-value">{stats.weaponAnims}</span>
                                     </div>
+                                    {loadedWeaponModels && loadedWeaponModels.length > 1 && (
+                                        <div className="skeleton-stat weapon-selector">
+                                            <span className="stat-label">Show Weapon</span>
+                                            <select
+                                                value={selectedWeaponIndex}
+                                                onChange={(e) => setSelectedWeaponIndex(Number(e.target.value))}
+                                                className="weapon-select"
+                                            >
+                                                {loadedWeaponModels.map((weapon, index) => (
+                                                    <option key={index} value={index} disabled={!weapon.pfile}>
+                                                        {weapon.name}{!weapon.pfile ? ' (not found)' : ''}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    )}
                                 </>
                             )}
                         </div>
@@ -491,12 +541,14 @@ function buildQuaternionYXZ(alpha, beta, gamma) {
 }
 
 // Render battle skeleton with bone hierarchy and animation transforms
-function renderBattleSkeleton(bones, boneModels, textures, animation) {
+function renderBattleSkeleton(bones, boneModels, textures, animationPack, weaponModels = [], selectedWeaponIndex = 0) {
     const meshes = [];
     const boundingBox = new THREE.Box3();
-    
+
     // Get first animation frame if available
-    const frame = animation?.getFirstFrame();
+    const frame = animationPack?.getFirstFrame();
+    // Get first weapon animation frame if available
+    const weaponFrame = animationPack?.getFirstWeaponFrame();
     
     // Create skeleton group with root transform
     const skeletonGroup = new THREE.Group();
@@ -567,28 +619,58 @@ function renderBattleSkeleton(bones, boneModels, textures, animation) {
         const boneEnd = new THREE.Vector3(0, 0, 0).applyMatrix4(currentMatrix);
         boundingBox.expandByPoint(boneEnd);
     }
-    
+
     // Wrap in a container to flip the model right-side up (like HRCPreview)
     const modelContainer = new THREE.Group();
     modelContainer.rotation.x = Math.PI;
     modelContainer.add(skeletonGroup);
-    
-    // Position model so feet are at y=0
-    if (!boundingBox.isEmpty()) {
-        modelContainer.position.y = boundingBox.max.y;
+
+    // Render weapon if available (PC battle models like Cloud have weapons)
+    // Weapon is rendered INDEPENDENTLY from skeleton - it has its own world-space transforms
+    // (not as a child of skeletonGroup, but as a sibling inside modelContainer)
+    if (weaponModels.length > 0 && weaponFrame && weaponFrame.bones.length > 0) {
+        // Use selected weapon model
+        const weaponModel = weaponModels[selectedWeaponIndex];
+        if (weaponModel && weaponModel.pfile) {
+            const weaponGroup = new THREE.Group();
+
+            // Apply weapon frame position (world-space, like skeleton's root position)
+            weaponGroup.position.set(weaponFrame.startX, weaponFrame.startY, weaponFrame.startZ);
+
+            // Apply weapon frame rotation using quaternion (matching Kimera's approach)
+            const weaponQuat = buildQuaternionYXZ(
+                weaponFrame.bones[0].alpha,
+                weaponFrame.bones[0].beta,
+                weaponFrame.bones[0].gamma
+            );
+            weaponGroup.quaternion.copy(weaponQuat);
+
+            // Create weapon mesh and add to weapon group
+            const weaponMesh = createMeshFromPFile(weaponModel.pfile, textures);
+            weaponGroup.add(weaponMesh);
+
+            // Add weapon as sibling to skeletonGroup (both are children of modelContainer)
+            modelContainer.add(weaponGroup);
+        }
     }
-    
+
+    // Compute actual world bounding box after all transforms (including skeletonGroup's position/rotation)
+    modelContainer.updateMatrixWorld(true);
+    const worldBox = new THREE.Box3().setFromObject(modelContainer);
+
+    // Position model so feet (bottom after flip) are at y=0
+    if (!worldBox.isEmpty()) {
+        modelContainer.position.y = -worldBox.min.y;
+
+        // Recompute final bounding box for camera fitting
+        modelContainer.updateMatrixWorld(true);
+        const finalBox = new THREE.Box3().setFromObject(modelContainer);
+        meshes.push(modelContainer);
+        return { meshes, boundingBox: finalBox };
+    }
+
     meshes.push(modelContainer);
-    
-    // Return flipped bounding box for camera fitting
-    const flippedBox = new THREE.Box3();
-    if (!boundingBox.isEmpty()) {
-        const modelHeight = boundingBox.max.y - boundingBox.min.y;
-        flippedBox.min.set(boundingBox.min.x, 0, boundingBox.min.z);
-        flippedBox.max.set(boundingBox.max.x, modelHeight, boundingBox.max.z);
-    }
-    
-    return { meshes, boundingBox: flippedBox };
+    return { meshes, boundingBox: new THREE.Box3() };
 }
 
 // Create mesh from P file data with textures (matching HRCPreview approach)
@@ -819,6 +901,7 @@ function createTexturedMeshes(pfile, textures) {
 
 function fitCameraToScene(camera, controls, boundingBox, isBattleLocation = false, groundPlaneCenter = null) {
     const size = boundingBox.getSize(new THREE.Vector3());
+    const center = boundingBox.getCenter(new THREE.Vector3());
 
     const maxDim = Math.max(size.x, size.y, size.z);
     const fov = camera.fov * (Math.PI / 180);
@@ -830,8 +913,7 @@ function fitCameraToScene(camera, controls, boundingBox, isBattleLocation = fals
     if (isBattleLocation && groundPlaneCenter) {
         orbitTarget = groundPlaneCenter.clone();
     } else {
-        // Target center of bounding box (works for both battle locations and character models)
-        const center = boundingBox.getCenter(new THREE.Vector3());
+        // Target center of bounding box - works for both battle locations and character models
         orbitTarget = center;
     }
 

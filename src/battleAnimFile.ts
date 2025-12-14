@@ -216,37 +216,69 @@ function processFrame(data: Uint8Array, offsetBit: { value: number }, key: numbe
 
 export class BattleAnimationPack {
     nAnimations: number;
-    animations: BattleAnimationData[];
-    
-    constructor(buffer: Uint8Array, skeletonBones: number = 0) {
+    skeletonAnimations: BattleAnimationData[];
+    weaponAnimations: BattleAnimationData[];
+
+    constructor(buffer: Uint8Array, skeletonBones: number = 0, nsSkeletonAnims: number = 1, nsWeaponAnims: number = 0) {
         const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
         let offset = 0;
-        
+
         // Read pack header - number of animations
         this.nAnimations = view.getInt32(offset, true); offset += 4;
-        this.animations = [];
-        
-        // Parse each animation in the pack (only first one for now)
-        for (let i = 0; i < this.nAnimations && offset < buffer.length; i++) {
-            const anim = parseAnimation(view, offset, skeletonBones);
-            this.animations.push(anim.data);
-            offset = anim.nextOffset;
-            
-            // Only need first animation for initial pose
-            if (i === 0) break;
+        this.skeletonAnimations = [];
+        this.weaponAnimations = [];
+
+        // Cap to actual count in file
+        const actualSkeletonAnims = Math.min(nsSkeletonAnims, this.nAnimations);
+        const actualWeaponAnims = Math.min(nsWeaponAnims, this.nAnimations - actualSkeletonAnims);
+
+        // Parse skeleton animations
+        for (let i = 0; i < actualSkeletonAnims && offset < buffer.length; i++) {
+            try {
+                const anim = parseAnimation(view, offset, skeletonBones);
+                this.skeletonAnimations.push(anim.data);
+                offset = anim.nextOffset;
+            } catch {
+                break;
+            }
+        }
+
+        // Parse weapon animations (1 bone each)
+        for (let i = 0; i < actualWeaponAnims && offset < buffer.length; i++) {
+            try {
+                const anim = parseAnimation(view, offset, 1);
+                this.weaponAnimations.push(anim.data);
+                offset = anim.nextOffset;
+            } catch {
+                break;
+            }
         }
     }
-    
+
     getFirstFrame(): BattleFrame | null {
-        if (this.animations.length > 0 && this.animations[0].frames.length > 0) {
-            return this.animations[0].frames[0];
+        if (this.skeletonAnimations.length > 0 && this.skeletonAnimations[0].frames.length > 0) {
+            return this.skeletonAnimations[0].frames[0];
         }
         return null;
     }
-    
+
+    getFirstWeaponFrame(): BattleFrame | null {
+        if (this.weaponAnimations.length > 0 && this.weaponAnimations[0].frames.length > 0) {
+            return this.weaponAnimations[0].frames[0];
+        }
+        return null;
+    }
+
     getFrame(animIndex: number, frameIndex: number): BattleFrame | null {
-        if (animIndex < this.animations.length && frameIndex < this.animations[animIndex].frames.length) {
-            return this.animations[animIndex].frames[frameIndex];
+        if (animIndex < this.skeletonAnimations.length && frameIndex < this.skeletonAnimations[animIndex].frames.length) {
+            return this.skeletonAnimations[animIndex].frames[frameIndex];
+        }
+        return null;
+    }
+
+    getWeaponFrame(animIndex: number, frameIndex: number): BattleFrame | null {
+        if (animIndex < this.weaponAnimations.length && frameIndex < this.weaponAnimations[animIndex].frames.length) {
+            return this.weaponAnimations[animIndex].frames[frameIndex];
         }
         return null;
     }
@@ -326,10 +358,10 @@ function parseAnimation(view: DataView, startOffset: number, skeletonBones: numb
 // Keep old class for backward compatibility (deprecated)
 export class BattleAnimation {
     data: BattleAnimationData;
-    
+
     constructor(buffer: Uint8Array, skeletonBones: number = 0) {
         const pack = new BattleAnimationPack(buffer, skeletonBones);
-        this.data = pack.animations[0] || {
+        this.data = pack.skeletonAnimations[0] || {
             nBones: 0,
             numFrames: 0,
             blockSize: 0,
@@ -339,11 +371,11 @@ export class BattleAnimation {
             frames: [],
         };
     }
-    
+
     getFirstFrame(): BattleFrame | null {
         return this.data.frames[0] || null;
     }
-    
+
     getFrame(index: number): BattleFrame | null {
         return this.data.frames[index] || null;
     }
