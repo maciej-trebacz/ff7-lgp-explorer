@@ -267,3 +267,22 @@
 .weapon-select option:disabled {
     color: var(--text-muted, #666);
 }
+
+.stat-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-secondary, #aaa);
+}
+
+.stat-checkbox input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+}
+
+.stat-checkbox:hover {
+    color: var(--text-primary, #fff);
+}

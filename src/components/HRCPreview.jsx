@@ -1,7 +1,6 @@
 import { useEffect, useRef, useMemo } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
-import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils';
 import { HRCFile } from '../hrcfile.ts';
 import { RSDFile } from '../rsdfile.ts';
 import { PFile } from '../pfile.ts';
@@ -404,111 +403,91 @@ export function HRCPreview({ data, filename, onLoadFile }) {
     );
 }
 
-// Create mesh from P file data with optional textures
-function createMeshFromPFile(pfile, textures = []) {
-    const { vertices, polygons, vertexColors, texCoords, groups } = pfile.model;
-    
-    // Group to hold all meshes (one per texture group + untextured)
-    const meshGroup = new THREE.Group();
-    
-    // Organize polygons by group to handle textures properly
-    // Build a map of polygon index -> group
-    const polyToGroup = new Map();
-    for (const group of groups) {
-        for (let i = 0; i < group.numPoly; i++) {
-            polyToGroup.set(group.offsetPoly + i, group);
-        }
-    }
-    
-    // Separate polygons by texture
-    const untexturedPolys = [];
-    const texturedPolysByTexId = new Map();
-    
-    for (let polyIdx = 0; polyIdx < polygons.length; polyIdx++) {
-        const group = polyToGroup.get(polyIdx);
-        if (group && group.texFlag === 1 && textures.length > 0 && group.texID < textures.length && textures[group.texID]) {
-            if (!texturedPolysByTexId.has(group.texID)) {
-                texturedPolysByTexId.set(group.texID, { polys: [], group });
-            }
-            texturedPolysByTexId.get(group.texID).polys.push({ polyIdx, poly: polygons[polyIdx], group });
+// Culling flags from FF7 P file format (PHundret structure)
+const V_CULLFACE = 0x2000;
+const V_NOCULL = 0x4000;
+
+// Determine material side based on hundret culling flags
+function getMaterialSide(hundret) {
+    const field_C = hundret?.field_C || 0;
+    const field_8 = hundret?.field_8 || 0;
+
+    // Check V_NOCULL first (higher priority)
+    if (field_C & V_NOCULL) {
+        if (field_8 & V_NOCULL) {
+            return THREE.DoubleSide; // No culling - render both sides
         } else {
-            untexturedPolys.push({ polyIdx, poly: polygons[polyIdx], group });
+            return THREE.BackSide; // Cull front faces
         }
     }
-    
-    // Create untextured mesh with vertex colors (gouraud shading)
-    if (untexturedPolys.length > 0) {
-        const positions = [];
-        const colors = [];
-        
-        for (const { poly, group } of untexturedPolys) {
-            const [i0, i1, i2] = poly.vertices;
-            // Vertex indices in polygons are relative to the group's offsetVert
-            const offsetVert = group ? group.offsetVert : 0;
-            const vi0 = i0 + offsetVert, vi1 = i1 + offsetVert, vi2 = i2 + offsetVert;
-            
-            if (vi0 >= vertices.length || vi1 >= vertices.length || vi2 >= vertices.length) continue;
-            
-            const v0 = vertices[vi0], v1 = vertices[vi1], v2 = vertices[vi2];
-            positions.push(v0.x, v0.y, v0.z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
-            
-            // Vertex colors for gouraud shading
-            if (vertexColors.length > 0) {
-                const c0 = vertexColors[vi0] || { r: 128, g: 128, b: 128 };
-                const c1 = vertexColors[vi1] || { r: 128, g: 128, b: 128 };
-                const c2 = vertexColors[vi2] || { r: 128, g: 128, b: 128 };
-                colors.push(c0.r / 255, c0.g / 255, c0.b / 255);
-                colors.push(c1.r / 255, c1.g / 255, c1.b / 255);
-                colors.push(c2.r / 255, c2.g / 255, c2.b / 255);
-            } else {
-                colors.push(0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6);
-            }
+
+    // Check V_CULLFACE
+    if (field_C & V_CULLFACE) {
+        if (field_8 & V_CULLFACE) {
+            return THREE.BackSide; // Cull front faces
+        } else {
+            return THREE.FrontSide; // Cull back faces (standard)
         }
-        
-        let geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-        geometry = BufferGeometryUtils.mergeVertices(geometry);
-        geometry.computeVertexNormals();
-        
-        const material = new THREE.MeshLambertMaterial({
-            vertexColors: true,
-            side: THREE.DoubleSide,
-        });
-        
-        meshGroup.add(new THREE.Mesh(geometry, material));
     }
-    
-    // Create textured meshes (one per texture)
-    for (const [texID, { polys }] of texturedPolysByTexId) {
+
+    // Default: cull back faces (standard backface culling)
+    return THREE.FrontSide;
+}
+
+// Create mesh from P file data with textures, normals, and proper culling
+function createMeshFromPFile(pfile, textures = []) {
+    const { vertices, polygons, vertexColors, texCoords, groups, normals, hundrets } = pfile.model;
+    const meshGroup = new THREE.Group();
+    const hasFileNormals = normals && normals.length > 0;
+
+    // Process each group separately to respect per-group culling settings
+    for (let groupIdx = 0; groupIdx < groups.length; groupIdx++) {
+        const group = groups[groupIdx];
+        const hundret = hundrets[groupIdx];
+        const isTextured = group.texFlag === 1 && textures.length > 0 && group.texID < textures.length && textures[group.texID];
+
         const positions = [];
+        const normalArray = [];
         const uvs = [];
         const colors = [];
-        
-        for (const { poly, group } of polys) {
+
+        // Process polygons for this group
+        for (let i = 0; i < group.numPoly; i++) {
+            const polyIdx = group.offsetPoly + i;
+            if (polyIdx >= polygons.length) continue;
+
+            const poly = polygons[polyIdx];
             const [i0, i1, i2] = poly.vertices;
-            // Vertex indices in polygons are relative to the group's offsetVert
-            const offsetVert = group.offsetVert;
-            const vi0 = i0 + offsetVert, vi1 = i1 + offsetVert, vi2 = i2 + offsetVert;
-            
+            const vi0 = i0 + group.offsetVert;
+            const vi1 = i1 + group.offsetVert;
+            const vi2 = i2 + group.offsetVert;
+
             if (vi0 >= vertices.length || vi1 >= vertices.length || vi2 >= vertices.length) continue;
-            
+
+            // Positions
             const v0 = vertices[vi0], v1 = vertices[vi1], v2 = vertices[vi2];
             positions.push(v0.x, v0.y, v0.z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
-            
-            // Get texture coordinates using group's offsetTex
-            // UV coords are indexed by: group.offsetTex + vertex_index (relative to group)
-            const offsetTex = group.offsetTex;
-            if (texCoords.length > 0) {
-                const uv0 = texCoords[offsetTex + i0] || { u: 0, v: 0 };
-                const uv1 = texCoords[offsetTex + i1] || { u: 0, v: 0 };
-                const uv2 = texCoords[offsetTex + i2] || { u: 0, v: 0 };
-                uvs.push(uv0.u, uv0.v, uv1.u, uv1.v, uv2.u, uv2.v);
-            } else {
-                uvs.push(0, 0, 0, 0, 0, 0);
+
+            // Normals from file (if available)
+            if (hasFileNormals && poly.normals) {
+                const [n0, n1, n2] = poly.normals;
+                const norm0 = normals[n0] || { x: 0, y: 1, z: 0 };
+                const norm1 = normals[n1] || { x: 0, y: 1, z: 0 };
+                const norm2 = normals[n2] || { x: 0, y: 1, z: 0 };
+                normalArray.push(norm0.x, norm0.y, norm0.z);
+                normalArray.push(norm1.x, norm1.y, norm1.z);
+                normalArray.push(norm2.x, norm2.y, norm2.z);
             }
-            
-            // Vertex colors for gouraud shading modulation
+
+            // Texture coordinates (if textured)
+            if (isTextured && texCoords.length > 0) {
+                const uv0 = texCoords[group.offsetTex + i0] || { u: 0, v: 0 };
+                const uv1 = texCoords[group.offsetTex + i1] || { u: 0, v: 0 };
+                const uv2 = texCoords[group.offsetTex + i2] || { u: 0, v: 0 };
+                uvs.push(uv0.u, uv0.v, uv1.u, uv1.v, uv2.u, uv2.v);
+            }
+
+            // Vertex colors
             if (vertexColors.length > 0) {
                 const c0 = vertexColors[vi0] || { r: 128, g: 128, b: 128 };
                 const c1 = vertexColors[vi1] || { r: 128, g: 128, b: 128 };
@@ -517,28 +496,51 @@ function createMeshFromPFile(pfile, textures = []) {
                 colors.push(c1.r / 255, c1.g / 255, c1.b / 255);
                 colors.push(c2.r / 255, c2.g / 255, c2.b / 255);
             } else {
-                colors.push(1, 1, 1, 1, 1, 1, 1, 1, 1);
+                const defaultColor = isTextured ? 1 : 0.6;
+                colors.push(defaultColor, defaultColor, defaultColor);
+                colors.push(defaultColor, defaultColor, defaultColor);
+                colors.push(defaultColor, defaultColor, defaultColor);
             }
         }
-        
+
+        if (positions.length === 0) continue;
+
+        // Create geometry
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-        geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
         geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-        // Don't merge vertices for textured meshes - it breaks UV mapping
-        geometry.computeVertexNormals();
-        
-        const material = new THREE.MeshLambertMaterial({
-            map: textures[texID],
-            vertexColors: true,
-            side: THREE.DoubleSide,
-            transparent: true,
-            alphaTest: 0.1,
-        });
-        
+
+        if (isTextured && uvs.length > 0) {
+            geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+        }
+
+        // Use file normals or compute them
+        if (normalArray.length > 0) {
+            geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normalArray, 3));
+        } else {
+            geometry.computeVertexNormals();
+        }
+
+        // Get material side based on hundret culling flags
+        const side = getMaterialSide(hundret);
+
+        // Create material
+        const material = isTextured
+            ? new THREE.MeshLambertMaterial({
+                map: textures[group.texID],
+                vertexColors: true,
+                side,
+                transparent: true,
+                alphaTest: 0.1,
+            })
+            : new THREE.MeshLambertMaterial({
+                vertexColors: true,
+                side,
+            });
+
         meshGroup.add(new THREE.Mesh(geometry, material));
     }
-    
+
     return meshGroup;
 }
 
