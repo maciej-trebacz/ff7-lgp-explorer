@@ -1,0 +1,230 @@
+.skeleton-preview {
+    display: flex;
+    flex-direction: row;
+    gap: 16px;
+    height: 100%;
+    min-height: 400px;
+}
+
+.skeleton-3d-view {
+    flex: 1;
+    min-width: 350px;
+    min-height: 350px;
+    background: #1a1a2e;
+    border-radius: 4px;
+}
+
+.skeleton-info-panel {
+    width: 280px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
+    overflow-y: auto;
+}
+
+.skeleton-header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color, #333);
+}
+
+.skeleton-type {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary, #fff);
+}
+
+.skeleton-filename {
+    font-size: 12px;
+    color: var(--text-muted, #888);
+    font-family: monospace;
+}
+
+.skeleton-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.skeleton-stat-group {
+    flex: 1;
+}
+
+.skeleton-stat-group h3 {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary, #aaa);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 0 0 8px 0;
+}
+
+.skeleton-stat {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    font-size: 13px;
+}
+
+.stat-label {
+    color: var(--text-secondary, #aaa);
+}
+
+.stat-value {
+    color: var(--text-primary, #fff);
+    font-weight: 500;
+    font-family: monospace;
+}
+
+.skeleton-bones {
+    border-top: 1px solid var(--border-color, #333);
+    padding-top: 12px;
+}
+
+.skeleton-bones h3,
+.skeleton-files h3 {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary, #aaa);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 0 0 8px 0;
+}
+
+.bone-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.bone-item {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    padding: 4px 8px;
+    background: var(--bg-tertiary, #2a2a2a);
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: monospace;
+}
+
+.bone-index {
+    color: var(--text-primary, #fff);
+    font-weight: 600;
+    min-width: 24px;
+}
+
+.bone-parent {
+    color: var(--text-secondary, #aaa);
+}
+
+.bone-length {
+    color: var(--text-muted, #888);
+}
+
+.bone-has-model {
+    background: #4a9eff;
+    color: #fff;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    margin-left: auto;
+}
+
+.skeleton-files {
+    border-top: 1px solid var(--border-color, #333);
+    padding-top: 12px;
+}
+
+.file-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.file-item {
+    display: flex;
+    flex-direction: column;
+    padding: 6px 8px;
+    background: var(--bg-tertiary, #2a2a2a);
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.file-name {
+    color: var(--text-primary, #fff);
+    font-family: monospace;
+    font-weight: 500;
+}
+
+.file-type {
+    color: var(--text-muted, #888);
+    font-size: 10px;
+}
+
+.skeleton-no-hierarchy {
+    flex: 1;
+    min-width: 350px;
+    min-height: 350px;
+    background: #1a1a2e;
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 8px;
+}
+
+.no-hierarchy-icon {
+    font-size: 48px;
+    opacity: 0.6;
+}
+
+.no-hierarchy-text {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary, #fff);
+}
+
+.no-hierarchy-detail {
+    font-size: 13px;
+    color: var(--text-muted, #888);
+}
+
+.skeleton-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 200px;
+    padding: 20px;
+    text-align: center;
+}
+
+.skeleton-error-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+}
+
+.skeleton-error-text {
+    font-size: 16px;
+    color: var(--text-primary, #fff);
+    margin-bottom: 8px;
+}
+
+.skeleton-error-detail {
+    font-size: 12px;
+    color: var(--text-muted, #888);
+    font-family: monospace;
+}

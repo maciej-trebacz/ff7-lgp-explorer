@@ -33,6 +33,35 @@ export function isBattleTexFile(filename: string): boolean {
   return suffix >= 'ac' && suffix <= 'al';
 }
 
+export function isBattleSkeletonFile(filename: string): boolean {
+  if (!/^[a-z]{4}$/i.test(filename)) return false;
+  const suffix = filename.slice(2, 4).toLowerCase();
+  return suffix === 'aa';
+}
+
+export function isHRCFile(filename: string): boolean {
+  return filename.toLowerCase().endsWith('.hrc');
+}
+
+export function isPModelFile(filename: string): boolean {
+  const lower = filename.toLowerCase();
+
+  // Check for .p extension
+  if (lower.endsWith('.p')) return true;
+
+  // Check 4-letter battle model naming convention
+  // **am to **bz are battle models (P files without extension)
+  if (/^[a-z]{4}$/i.test(lower)) {
+    const suffix = lower.slice(2, 4);
+    // am-az and ba-bz are model files
+    if ((suffix >= 'am' && suffix <= 'az') || (suffix >= 'ba' && suffix <= 'bz')) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export function getFileType(filename: string): string {
   const lower = filename.toLowerCase();
   

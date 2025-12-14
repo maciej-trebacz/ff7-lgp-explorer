@@ -192,9 +192,10 @@ export class LGP {
     }
 
     getFile(name: string): Uint8Array | null {
-        const entry = this.archive.toc.find(item => item.filename === name);
+        const nameLower = name.toLowerCase();
+        const entry = this.archive.toc.find(item => item.filename.toLowerCase() === nameLower);
         if (!entry) return null;
-        if (this.modified[name]) return this.modified[name];
+        if (this.modified[entry.filename]) return this.modified[entry.filename];
 
         const out = new Uint8Array(entry.filesize);
         const offset = entry.offset + FILE_HEADER_SIZE;
@@ -203,19 +204,20 @@ export class LGP {
     }
 
     setFile(name: string, data: Uint8Array): boolean {
-        const entry = this.archive.toc.find(item => item.filename === name);
-        if (!entry) return false; 
-        entry.filesize = data.length; 
-        this.modified[name] = data;
+        const nameLower = name.toLowerCase();
+        const entry = this.archive.toc.find(item => item.filename.toLowerCase() === nameLower);
+        if (!entry) return false;
+        entry.filesize = data.length;
+        this.modified[entry.filename] = data;
         return true;
     }
 
     insertFile(name: string, data: Uint8Array): boolean {
         // Truncate filename to max 19 chars (20 bytes with null terminator)
-        const filename = name.slice(0, 19);
-        
-        // Check if file already exists
-        if (this.archive.toc.find(item => item.filename === filename)) {
+        const filename = name.slice(0, 19).toLowerCase();
+
+        // Check if file already exists (case-insensitive)
+        if (this.archive.toc.find(item => item.filename.toLowerCase() === filename)) {
             return false;
         }
         
@@ -235,16 +237,19 @@ export class LGP {
     }
 
     removeFile(name: string): boolean {
-        const index = this.archive.toc.findIndex(item => item.filename === name);
+        const nameLower = name.toLowerCase();
+        const index = this.archive.toc.findIndex(item => item.filename.toLowerCase() === nameLower);
         if (index === -1) return false;
-        
+
+        const actualFilename = this.archive.toc[index].filename;
+
         // Remove from TOC
         this.archive.toc.splice(index, 1);
         this.archive.numFiles = this.archive.toc.length;
-        
+
         // Remove from modified if present
-        delete this.modified[name];
-        
+        delete this.modified[actualFilename];
+
         return true;
     }
 

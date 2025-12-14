@@ -703,6 +703,7 @@ function App() {
           filename={quickLookFile.filename}
           data={quickLookFile.data}
           onClose={closeQuickLook}
+          onLoadFile={(name) => lgp?.getFile(name)}
         />
       )}
     </div>
