@@ -218,7 +218,8 @@ export function HRCPreview({ data, filename, onLoadFile }) {
                                     }
                                     
                                     const pfile = new PFile(pData);
-                                    const mesh = createMeshFromPFile(pfile, textures);
+                                    // Pass flipped=true because modelContainer has rotation.x = PI which reverses winding order
+                                    const mesh = createMeshFromPFile(pfile, textures, true);
                                     
                                     // Apply accumulated transform
                                     mesh.applyMatrix4(currentMatrix);
@@ -408,34 +409,45 @@ const V_CULLFACE = 0x2000;
 const V_NOCULL = 0x4000;
 
 // Determine material side based on hundret culling flags
-function getMaterialSide(hundret) {
+// If flipped is true, invert front/back (used for models with rotation.x = PI transform)
+function getMaterialSide(hundret, flipped = false) {
     const field_C = hundret?.field_C || 0;
     const field_8 = hundret?.field_8 || 0;
+
+    let side;
 
     // Check V_NOCULL first (higher priority)
     if (field_C & V_NOCULL) {
         if (field_8 & V_NOCULL) {
-            return THREE.DoubleSide; // No culling - render both sides
+            return THREE.DoubleSide; // No culling - render both sides (no inversion needed)
         } else {
-            return THREE.BackSide; // Cull front faces
+            side = THREE.BackSide; // Cull front faces
         }
     }
-
     // Check V_CULLFACE
-    if (field_C & V_CULLFACE) {
+    else if (field_C & V_CULLFACE) {
         if (field_8 & V_CULLFACE) {
-            return THREE.BackSide; // Cull front faces
+            side = THREE.BackSide; // Cull front faces
         } else {
-            return THREE.FrontSide; // Cull back faces (standard)
+            side = THREE.FrontSide; // Cull back faces (standard)
         }
     }
-
     // Default: cull back faces (standard backface culling)
-    return THREE.FrontSide;
+    else {
+        side = THREE.FrontSide;
+    }
+
+    // Invert front/back if model will be flipped (rotation.x = PI reverses winding order)
+    if (flipped && side !== THREE.DoubleSide) {
+        side = side === THREE.FrontSide ? THREE.BackSide : THREE.FrontSide;
+    }
+
+    return side;
 }
 
 // Create mesh from P file data with textures, normals, and proper culling
-function createMeshFromPFile(pfile, textures = []) {
+// flipped: true if the model will have rotation.x = PI applied (inverts winding order)
+function createMeshFromPFile(pfile, textures = [], flipped = false) {
     const { vertices, polygons, vertexColors, texCoords, groups, normals, hundrets } = pfile.model;
     const meshGroup = new THREE.Group();
     const hasFileNormals = normals && normals.length > 0;
@@ -522,7 +534,7 @@ function createMeshFromPFile(pfile, textures = []) {
         }
 
         // Get material side based on hundret culling flags
-        const side = getMaterialSide(hundret);
+        const side = getMaterialSide(hundret, flipped);
 
         // Create material
         const material = isTextured
