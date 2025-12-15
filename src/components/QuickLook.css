@@ -50,7 +50,12 @@
   color: var(--text-secondary);
 }
 
-.quicklook-close {
+.quicklook-header-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.quicklook-button {
   width: 28px;
   height: 28px;
   padding: 0;
@@ -66,10 +71,15 @@
   justify-content: center;
 }
 
-.quicklook-close:hover {
+.quicklook-button:hover {
   background: var(--bg-primary);
   color: var(--text-primary);
   border: none;
+}
+
+.quicklook-button svg {
+  width: 16px;
+  height: 16px;
 }
 
 .quicklook-content {
@@ -85,4 +95,29 @@
   border-top: 1px solid var(--border);
   color: var(--text-secondary);
   font-size: 12px;
+}
+
+/* Docked mode styles */
+.quicklook-docked {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.quicklook-docked .quicklook-header {
+  flex-shrink: 0;
+}
+
+.quicklook-docked .quicklook-content {
+  flex: 1;
+  min-height: 0;
+}
+
+.quicklook-docked .quicklook-footer {
+  flex-shrink: 0;
 }

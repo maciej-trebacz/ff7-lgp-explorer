@@ -5,6 +5,25 @@
   background: var(--bg-primary);
 }
 
+/* Split view container */
+.split-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.split-view-active {
+  flex-direction: row;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+.split-view-active .main-content {
+  flex: 1;
+  margin: 0;
+}
+
 .main-content {
   flex: 1;
   display: flex;

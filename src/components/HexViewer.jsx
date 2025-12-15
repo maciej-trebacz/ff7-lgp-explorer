@@ -93,7 +93,10 @@ export function HexViewer({ data, columns, onColumnsChange }) {
     for (let i = 0; i < columns; i++) {
       if (i < bytes.length) {
         const byte = bytes[i];
-        if (byte >= 32 && byte < 127) {
+        if (byte === 32) {
+          // Use non-breaking space to prevent alignment issues
+          ascii += '\u00A0';
+        } else if (byte > 32 && byte < 127) {
           ascii += String.fromCharCode(byte);
         } else {
           ascii += '.';

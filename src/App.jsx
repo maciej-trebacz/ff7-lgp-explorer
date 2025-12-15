@@ -17,11 +17,13 @@ function App() {
   const [status, setStatus] = useState('Ready');
   const [searchQuery, setSearchQuery] = useState('');
   const [quickLookFile, setQuickLookFile] = useState(null);
+  const [previewMode, setPreviewMode] = useState('hidden'); // 'hidden' | 'modal' | 'docked'
   const [isDragging, setIsDragging] = useState(false);
   const [sortColumn, setSortColumn] = useState('index');
   const [sortDirection, setSortDirection] = useState('asc');
   const lastSelectedIndex = useRef(null);
   const dragCounter = useRef(0);
+  const lastUsedPreviewMode = useRef('modal');
 
   const fileInputRef = useRef(null);
   const replaceInputRef = useRef(null);
@@ -416,16 +418,19 @@ function App() {
     }
   }, [sortColumn]);
 
-  const openQuickLookForFile = useCallback((file) => {
+  const openQuickLookForFile = useCallback((file, mode) => {
     if (!lgp || !file) return;
-    
+
     const data = lgp.getFile(file.filename);
     if (!data) {
       setStatus(`Error: Could not read ${file.filename}`);
       return;
     }
-    
+
+    const targetMode = mode || lastUsedPreviewMode.current;
     setQuickLookFile({ filename: file.filename, data });
+    setPreviewMode(targetMode);
+    lastUsedPreviewMode.current = targetMode;
   }, [lgp]);
 
   const openQuickLook = useCallback(() => {
@@ -440,17 +445,52 @@ function App() {
 
   const closeQuickLook = useCallback(() => {
     setQuickLookFile(null);
+    setPreviewMode('hidden');
   }, []);
+
+  const dockPreview = useCallback(() => {
+    setPreviewMode('docked');
+    lastUsedPreviewMode.current = 'docked';
+  }, []);
+
+  const undockPreview = useCallback(() => {
+    setPreviewMode('modal');
+    lastUsedPreviewMode.current = 'modal';
+  }, []);
+
+  // Auto-update preview when selection changes in docked mode
+  useEffect(() => {
+    if (previewMode !== 'docked' || !lgp) return;
+
+    // Get the last selected file
+    if (selectedIndices.size === 0) return;
+
+    const selectedIndex = [...selectedIndices].pop();
+    const file = files.find(f => f.tocIndex === selectedIndex);
+    if (!file) return;
+
+    // Don't reload if it's the same file
+    if (quickLookFile?.filename === file.filename) return;
+
+    const data = lgp.getFile(file.filename);
+    if (data) {
+      // Defer the state update to avoid cascading renders
+      queueMicrotask(() => {
+        setQuickLookFile({ filename: file.filename, data });
+      });
+    }
+  }, [previewMode, selectedIndices, files, lgp, quickLookFile?.filename]);
 
   // Keyboard handling for QuickLook and navigation
   useEffect(() => {
     const handleKeyDown = (e) => {
       // Don't trigger if typing in an input
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-      // Don't trigger if QuickLook is already open
-      if (quickLookFile) return;
-      
-      if (e.code === 'Space' && selectedIndices.size === 1) {
+      // Don't trigger any navigation if QuickLook modal is open
+      if (previewMode === 'modal') return;
+
+      // Space opens preview when hidden, but not when docked (QuickLook handles it)
+      if (e.code === 'Space' && selectedIndices.size === 1 && previewMode === 'hidden') {
         e.preventDefault();
         openQuickLook();
       }
@@ -575,7 +615,7 @@ function App() {
     
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [selectedIndices, quickLookFile, openQuickLook, lgp, displayFiles, currentPath]);
+  }, [selectedIndices, previewMode, openQuickLook, lgp, displayFiles, currentPath]);
 
   // Drag & drop handlers
   const handleDragEnter = useCallback((e) => {
@@ -664,51 +704,64 @@ function App() {
         onSearchChange={handleSearchChange}
       />
       
-      <div className="main-content">
-        {lgp && (
-          <div className="breadcrumb">
-            <span 
-              className="breadcrumb-item" 
-              onClick={() => { setCurrentPath(''); setSelectedIndices(new Set()); }}
-            >
-              {archiveName}
-            </span>
-            {breadcrumbParts.map((part, i) => (
-              <span key={i}>
-                <span className="breadcrumb-separator">/</span>
-                <span 
-                  className="breadcrumb-item"
-                  onClick={() => {
-                    const newPath = breadcrumbParts.slice(0, i + 1).join('/');
-                    setCurrentPath(newPath);
-                    setSelectedIndices(new Set());
-                  }}
-                >
-                  {part}
-                </span>
+      <div className={`split-view ${previewMode === 'docked' ? 'split-view-active' : ''}`}>
+        <div className="main-content">
+          {lgp && (
+            <div className="breadcrumb">
+              <span
+                className="breadcrumb-item"
+                onClick={() => { setCurrentPath(''); setSelectedIndices(new Set()); }}
+              >
+                {archiveName}
               </span>
-            ))}
-          </div>
-        )}
-        
-        {lgp ? (
-          <FileList
-            ref={fileListRef}
-            files={displayFiles}
-            currentPath={currentPath}
-            selectedIndices={selectedIndices}
-            onSelect={handleSelect}
-            onNavigate={handleNavigate}
-            onDoubleClick={openQuickLookForFile}
-            sortColumn={sortColumn}
-            sortDirection={sortDirection}
-            onSort={handleSort}
+              {breadcrumbParts.map((part, i) => (
+                <span key={i}>
+                  <span className="breadcrumb-separator">/</span>
+                  <span
+                    className="breadcrumb-item"
+                    onClick={() => {
+                      const newPath = breadcrumbParts.slice(0, i + 1).join('/');
+                      setCurrentPath(newPath);
+                      setSelectedIndices(new Set());
+                    }}
+                  >
+                    {part}
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {lgp ? (
+            <FileList
+              ref={fileListRef}
+              files={displayFiles}
+              currentPath={currentPath}
+              selectedIndices={selectedIndices}
+              onSelect={handleSelect}
+              onNavigate={handleNavigate}
+              onDoubleClick={openQuickLookForFile}
+              sortColumn={sortColumn}
+              sortDirection={sortDirection}
+              onSort={handleSort}
+            />
+          ) : (
+            <div className="empty-state">
+              <div className="empty-state-icon">📦</div>
+              <div className="empty-state-text">Open or drag & drop an LGP archive</div>
+            </div>
+          )}
+        </div>
+
+        {previewMode === 'docked' && quickLookFile && (
+          <QuickLook
+            filename={quickLookFile.filename}
+            data={quickLookFile.data}
+            onClose={closeQuickLook}
+            onLoadFile={(name) => lgp?.getFile(name)}
+            mode="docked"
+            onUndock={undockPreview}
           />
-        ) : (
-          <div className="empty-state">
-            <div className="empty-state-icon">📦</div>
-            <div className="empty-state-text">Open or drag & drop an LGP archive</div>
-          </div>
         )}
       </div>
       
@@ -740,12 +793,14 @@ function App() {
         onChange={handleAddSelect}
       />
       
-      {quickLookFile && (
+      {previewMode === 'modal' && quickLookFile && (
         <QuickLook
           filename={quickLookFile.filename}
           data={quickLookFile.data}
           onClose={closeQuickLook}
           onLoadFile={(name) => lgp?.getFile(name)}
+          mode="modal"
+          onDock={dockPreview}
         />
       )}
     </div>
