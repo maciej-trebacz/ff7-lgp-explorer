@@ -65,6 +65,9 @@ interface TexData {
     palette?: Uint8Array;
     pixels: Uint8Array;
     colorKeyArray?: Uint8Array;
+    // Internal fields from parser
+    _formatIndicator: number;
+    _headerSize: number;
 }
 
 const pixelFormatParser = new Parser()
@@ -89,6 +92,10 @@ const pixelFormatParser = new Parser()
     .uint32le('blueMax')
     .uint32le('alphaMax');
 
+// TEX header parser that handles both standard (236 bytes) and alternative (232 bytes) formats.
+// The difference is a 4-byte field at offset 0x2C that's present in standard format but absent in alternative.
+// Detection: In standard format, 0x2C is a padding field (always 0). In alternative format, 0x2C is numPalettes (non-zero).
+// We read the value at 0x2C, then use seek() to rewind if it's non-zero (meaning we need to re-read it as numPalettes).
 const texHeaderParser = new Parser()
     .uint32le('version')
     .skip(4) // Unknown
@@ -100,7 +107,13 @@ const texHeaderParser = new Parser()
     .uint32le('maxAlphaBits')
     .uint32le('minBitsPerPixel')
     .uint32le('maxBitsPerPixel')
-    .skip(4) // Unknown
+    // Read potential skip field at 0x2C - determines format variant
+    .uint32le('_formatIndicator')
+    .seek(function() {
+        // If non-zero, this is actually numPalettes (alternative format), so rewind to re-read it
+        // @ts-ignore - binary-parser types don't include 'this' context
+        return this._formatIndicator !== 0 ? -4 : 0;
+    })
     .uint32le('numPalettes')
     .uint32le('colorsPerPalette')
     .uint32le('bitDepth')
@@ -123,45 +136,69 @@ const texHeaderParser = new Parser()
     .skip(4) // Runtime data
     .uint32le('referenceAlpha')
     .skip(36) // Runtime data and unknown
-    // Pixel data - Read width * height * "bytes per pixel" bytes of data
-    .array('pixels', {
-        type: 'uint8',
-        length: function() {
-            return this.width * this.height * this.bytesPerPixel;
-        }
-    })
-    //Color key array - Number of palettes * 1 bytes.
-    .array('colorKeyArray', {
-        type: 'uint8',
-        length: 'numPalettes'
-    })
+    .saveOffset('_headerSize'); // Captures actual header size (0xEC or 0xE8)
+
+// Validate that parsed TEX data has reasonable values
+function isValidTexData(data: TexData): boolean {
+    return (
+        data.width > 0 && data.width <= 4096 &&
+        data.height > 0 && data.height <= 4096 &&
+        data.bitDepth > 0 && data.bitDepth <= 32 &&
+        data.bytesPerPixel > 0 && data.bytesPerPixel <= 4
+    );
+}
 
 export class TexFile {
     data: TexData;
 
     constructor(data: Uint8Array) {
-        // Parse the header first
-        const header = texHeaderParser.parse(data);
-        this.data = header;
+        // Parse the header - the parser auto-detects format variant via seek()
+        let header: TexData;
+        try {
+            header = texHeaderParser.parse(data);
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            throw new Error(`Failed to parse TEX header: ${msg}`);
+        }
 
-        let offset = 0xEC; // Header size
+        // Validate parsed data
+        if (!isValidTexData(header)) {
+            throw new Error(
+                `Invalid TEX data: ${header.width}x${header.height}, ` +
+                `bitDepth=${header.bitDepth}, bytesPerPixel=${header.bytesPerPixel}`
+            );
+        }
+
+        this.data = header;
+        let offset = this.data._headerSize;
 
         // Read palette if present
         if (this.data.paletteFlag !== 0) {
             const paletteSize = this.data.paletteSize * 4;
+            if (offset + paletteSize > data.length) {
+                throw new Error(`TEX file truncated: expected palette at offset ${offset}, file size ${data.length}`);
+            }
             this.data.palette = data.slice(offset, offset + paletteSize);
             offset += paletteSize;
         }
 
         // Read pixel data
         const pixelDataSize = this.data.width * this.data.height * this.data.bytesPerPixel;
+        if (offset + pixelDataSize > data.length) {
+            throw new Error(
+                `TEX file truncated: expected ${pixelDataSize} bytes of pixel data at offset ${offset}, ` +
+                `file size ${data.length}`
+            );
+        }
         this.data.pixels = data.slice(offset, offset + pixelDataSize);
         offset += pixelDataSize;
 
         // Read color key array if present
         if (this.data.colorKeyArrayFlag !== 0) {
             const colorKeyArraySize = this.data.numPalettes;
-            this.data.colorKeyArray = data.slice(offset, offset + colorKeyArraySize);
+            if (offset + colorKeyArraySize <= data.length) {
+                this.data.colorKeyArray = data.slice(offset, offset + colorKeyArraySize);
+            }
         }
     }
 
