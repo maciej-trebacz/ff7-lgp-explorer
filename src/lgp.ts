@@ -120,8 +120,8 @@ export class LGP {
     data: Uint8Array;
     modified: {[key: string]: Uint8Array} = {};
 
-    constructor(data: ArrayBuffer) {
-        this.data = new Uint8Array(data);
+    constructor(data: ArrayBuffer | Uint8Array) {
+        this.data = data instanceof Uint8Array ? data : new Uint8Array(data);
         this.archive = lgpParser.parse(this.data);
         if (this.archive.magic !== DEFAULT_MAGIC) {
             throw Error("Invalid LGP header: expected " + DEFAULT_MAGIC + ", got " + this.archive.magic);

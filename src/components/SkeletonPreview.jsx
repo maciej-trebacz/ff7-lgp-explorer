@@ -1,11 +1,11 @@
 import { useEffect, useRef, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
-import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils';
 import { SkeletonFile } from '../skeleton.ts';
 import { PFile } from '../pfile.ts';
 import { TexFile } from '../texfile.ts';
 import { BattleAnimationPack } from '../battleAnimFile.ts';
+import { createMeshFromPFile } from '../utils/pfileRenderer.js';
 import './SkeletonPreview.css';
 
 export function SkeletonPreview({ data, filename, onLoadFile }) {
@@ -249,13 +249,11 @@ export function SkeletonPreview({ data, filename, onLoadFile }) {
         renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
         container.appendChild(renderer.domElement);
 
-        // Controls
+        // Controls - orbit style (no roll)
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
-        controls.dampingFactor = 0.05;
-        controls.screenSpacePanning = true;
-        controls.minPolarAngle = 0.1;
-        controls.maxPolarAngle = Math.PI - 0.1;
+        controls.dampingFactor = 0.1;
+        controls.screenSpacePanning = true; // Shift+drag to pan
 
         // Lighting (increased for linear color space)
         const ambientLight = new THREE.AmbientLight(0xffffff, 1.5);
@@ -273,21 +271,33 @@ export function SkeletonPreview({ data, filename, onLoadFile }) {
         let groundPlaneBox = null;
 
         if (isBattleLocation && loadedParts) {
+            // Container for battle location - flip Y and Z to match coordinate system
+            const locationContainer = new THREE.Group();
+            locationContainer.scale.y = -1;
+            locationContainer.scale.z = -1;
+            scene.add(locationContainer);
+            meshesToDispose.push(locationContainer);
+
             // Render battle location parts with textures
             loadedParts.forEach((part, partIndex) => {
-                const meshes = createTexturedMeshes(part.pfile, loadedTextures || [], cullingEnabled, partIndex);
-                meshes.forEach(mesh => {
-                    mesh.name = part.name;
-                    scene.add(mesh);
-                    meshesToDispose.push(mesh);
-                    boundingBox.expandByObject(mesh);
-
-                    // First part is the ground plane - capture its bounding box for camera fitting
-                    if (partIndex === 0 && !groundPlaneBox) {
-                        groundPlaneBox = new THREE.Box3().setFromObject(mesh);
-                    }
+                const meshGroup = createMeshFromPFile(part.pfile, {
+                    textures: loadedTextures || [],
+                    cullingEnabled,
+                    invertCulling: true,
+                    meshIndex: partIndex,
                 });
+                meshGroup.name = part.name;
+                locationContainer.add(meshGroup);
+
+                // First part is the ground plane - capture its bounding box for camera fitting
+                if (partIndex === 0 && !groundPlaneBox) {
+                    locationContainer.updateMatrixWorld(true);
+                    groundPlaneBox = new THREE.Box3().setFromObject(meshGroup);
+                }
             });
+
+            locationContainer.updateMatrixWorld(true);
+            boundingBox.setFromObject(locationContainer);
         } else if (hasBones && loadedBoneModels) {
             // Render character/enemy skeleton with actual 3D meshes
             const result = renderBattleSkeleton(
@@ -337,12 +347,25 @@ export function SkeletonPreview({ data, filename, onLoadFile }) {
             controls.dispose();
             renderer.dispose();
             meshesToDispose.forEach(mesh => {
-                mesh.geometry?.dispose();
-                if (mesh.material) {
-                    if (Array.isArray(mesh.material)) {
-                        mesh.material.forEach(m => m.dispose());
-                    } else {
-                        mesh.material.dispose();
+                if (mesh.traverse) {
+                    mesh.traverse(child => {
+                        if (child.geometry) child.geometry.dispose();
+                        if (child.material) {
+                            if (Array.isArray(child.material)) {
+                                child.material.forEach(m => m.dispose());
+                            } else {
+                                child.material.dispose();
+                            }
+                        }
+                    });
+                } else {
+                    mesh.geometry?.dispose();
+                    if (mesh.material) {
+                        if (Array.isArray(mesh.material)) {
+                            mesh.material.forEach(m => m.dispose());
+                        } else {
+                            mesh.material.dispose();
+                        }
                     }
                 }
             });
@@ -366,7 +389,7 @@ export function SkeletonPreview({ data, filename, onLoadFile }) {
     const isBattleLocation = skeleton && skeleton.model.isBattleLocation;
     const showCanvas = (isBattleLocation && loadedParts && loadedParts.length > 0) ||
                        (!isBattleLocation && hasBones && loadedBoneModels);
-    const isLoading = (isBattleLocation && !loadedParts) || 
+    const isLoading = (isBattleLocation && !loadedParts) ||
                       (!isBattleLocation && hasBones && !loadedBoneModels);
 
     return (
@@ -533,21 +556,21 @@ function createThreeTexture(texFile) {
 // Build quaternion from Euler angles in YXZ order (matching Kimera's BuildRotationMatrixWithQuaternions)
 function buildQuaternionYXZ(alpha, beta, gamma) {
     const DEG2RAD = Math.PI / 180;
-    
+
     const ax = (alpha * DEG2RAD) / 2;
     const ay = (beta * DEG2RAD) / 2;
     const az = (gamma * DEG2RAD) / 2;
-    
+
     const qx = new THREE.Quaternion(Math.sin(ax), 0, 0, Math.cos(ax));
     const qy = new THREE.Quaternion(0, Math.sin(ay), 0, Math.cos(ay));
     const qz = new THREE.Quaternion(0, 0, Math.sin(az), Math.cos(az));
-    
+
     // Multiply in YXZ order: Y * X * Z
     const result = new THREE.Quaternion();
     result.copy(qy);
     result.multiply(qx);
     result.multiply(qz);
-    
+
     return result;
 }
 
@@ -560,14 +583,14 @@ function renderBattleSkeleton(bones, boneModels, textures, animationPack, weapon
     const frame = animationPack?.getFirstFrame();
     // Get first weapon animation frame if available
     const weaponFrame = animationPack?.getFirstWeaponFrame();
-    
+
     // Create skeleton group with root transform
     const skeletonGroup = new THREE.Group();
-    
+
     if (frame) {
         // Apply root translation
         skeletonGroup.position.set(frame.startX, frame.startY, frame.startZ);
-        
+
         // Apply root rotation (first bone rotation is root rotation)
         if (frame.bones.length > 0) {
             const rootQuat = buildQuaternionYXZ(
@@ -578,26 +601,27 @@ function renderBattleSkeleton(bones, boneModels, textures, animationPack, weapon
             skeletonGroup.quaternion.copy(rootQuat);
         }
     }
-    
+
     // For bone index offset in animation
     // If nBones > 1, bone rotations start at frame.bones[1] for bone 0
     const itmpbones = bones.length > 1 ? 1 : 0;
-    
+
     // Build bone hierarchy using stack (matching Kimera's DrawBattleSkeleton)
     const jointStack = [-1];  // Sentinel for root
     const matrixStack = [new THREE.Matrix4()];
+
     for (let boneIdx = 0; boneIdx < bones.length; boneIdx++) {
         const bone = bones[boneIdx];
-        
+
         // Navigate hierarchy - pop until we find matching parent
         while (jointStack.length > 1 && bone.parentBone !== jointStack[jointStack.length - 1]) {
             jointStack.pop();
             matrixStack.pop();
         }
-        
+
         // Get current transform from parent
         const currentMatrix = matrixStack[matrixStack.length - 1].clone();
-        
+
         // Apply bone rotation from animation
         if (frame && frame.bones[boneIdx + itmpbones]) {
             const rot = frame.bones[boneIdx + itmpbones];
@@ -605,37 +629,41 @@ function renderBattleSkeleton(bones, boneModels, textures, animationPack, weapon
             const rotMatrix = new THREE.Matrix4().makeRotationFromQuaternion(boneQuat);
             currentMatrix.multiply(rotMatrix);
         }
-        
+
         // Render P model at current transform if this bone has one
         const boneModel = boneModels[boneIdx];
         if (boneModel && boneModel.pfile) {
-            // Pass flipped=true because modelContainer has rotation.x = PI which reverses winding order
-            // Pass boneIdx as meshIndex for polygon offset ordering
-            const meshGroup = createMeshFromPFile(boneModel.pfile, textures, true, cullingEnabled, boneIdx);
+            const meshGroup = createMeshFromPFile(boneModel.pfile, {
+                textures,
+                cullingEnabled,
+                invertCulling: true,
+                meshIndex: boneIdx,
+            });
             meshGroup.applyMatrix4(currentMatrix);
             skeletonGroup.add(meshGroup);
-            
+
             // Expand bounding box
             const meshBox = new THREE.Box3().setFromObject(meshGroup);
             boundingBox.union(meshBox);
         }
-        
+
         // Translate along +Z by bone length for next bone (battle skeleton uses +Z)
         const translateMatrix = new THREE.Matrix4().makeTranslation(0, 0, bone.length);
         currentMatrix.multiply(translateMatrix);
-        
+
         // Push current bone onto stack
         jointStack.push(boneIdx);
         matrixStack.push(currentMatrix);
-        
+
         // Expand bounding box with bone endpoint
         const boneEnd = new THREE.Vector3(0, 0, 0).applyMatrix4(currentMatrix);
         boundingBox.expandByPoint(boneEnd);
     }
 
-    // Wrap in a container to flip the model right-side up (like HRCPreview)
+    // Container for the skeleton - flip Y to match coordinate system
     const modelContainer = new THREE.Group();
-    modelContainer.rotation.x = Math.PI;
+    modelContainer.scale.y = -1;
+    modelContainer.scale.z = -1;
     modelContainer.add(skeletonGroup);
 
     // Render weapon if available (PC battle models like Cloud have weapons)
@@ -659,9 +687,13 @@ function renderBattleSkeleton(bones, boneModels, textures, animationPack, weapon
             weaponGroup.quaternion.copy(weaponQuat);
 
             // Create weapon mesh and add to weapon group
-            // Pass flipped=true because modelContainer has rotation.x = PI which reverses winding order
             // Use high meshIndex (bones.length + 10) so weapon renders on top of body parts
-            const weaponMesh = createMeshFromPFile(weaponModel.pfile, textures, true, cullingEnabled, bones.length + 10);
+            const weaponMesh = createMeshFromPFile(weaponModel.pfile, {
+                textures,
+                cullingEnabled,
+                invertCulling: true,
+                meshIndex: bones.length + 10,
+            });
             weaponGroup.add(weaponMesh);
 
             // Add weapon as sibling to skeletonGroup (both are children of modelContainer)
@@ -686,294 +718,6 @@ function renderBattleSkeleton(bones, boneModels, textures, animationPack, weapon
 
     meshes.push(modelContainer);
     return { meshes, boundingBox: new THREE.Box3() };
-}
-
-// Culling flags from FF7 P file format (PHundret structure)
-const V_CULLFACE = 0x2000;
-const V_NOCULL = 0x4000;
-
-// Determine material side based on hundret culling flags
-// If flipped is true, invert front/back (used for models with rotation.x = PI transform)
-// If cullingEnabled is false, always return DoubleSide
-function getMaterialSide(hundret, flipped = false, cullingEnabled = true) {
-    // If culling is disabled, render both sides
-    if (!cullingEnabled) {
-        return THREE.DoubleSide;
-    }
-
-    const field_C = hundret?.field_C || 0;
-    const field_8 = hundret?.field_8 || 0;
-
-    let side;
-
-    // Check V_NOCULL first (higher priority)
-    if (field_C & V_NOCULL) {
-        if (field_8 & V_NOCULL) {
-            return THREE.DoubleSide; // No culling - render both sides (no inversion needed)
-        } else {
-            side = THREE.BackSide; // Cull front faces
-        }
-    }
-    // Check V_CULLFACE
-    else if (field_C & V_CULLFACE) {
-        if (field_8 & V_CULLFACE) {
-            side = THREE.BackSide; // Cull front faces
-        } else {
-            side = THREE.FrontSide; // Cull back faces (standard)
-        }
-    }
-    // Default: cull back faces (standard backface culling)
-    else {
-        side = THREE.FrontSide;
-    }
-
-    // Invert front/back if model will be flipped (rotation.x = PI reverses winding order)
-    if (flipped && side !== THREE.DoubleSide) {
-        side = side === THREE.FrontSide ? THREE.BackSide : THREE.FrontSide;
-    }
-
-    return side;
-}
-
-// Create mesh from P file data with textures, normals, and proper culling
-// flipped: true if the model will have rotation.x = PI applied (inverts winding order)
-// cullingEnabled: whether to apply face culling or render double-sided
-// meshIndex: global index for polygon offset to prevent z-fighting across multiple P files
-function createMeshFromPFile(pfile, textures, flipped = false, cullingEnabled = true, meshIndex = 0) {
-    const { vertices, polygons, vertexColors, texCoords, groups, normals, hundrets } = pfile.model;
-    const meshGroup = new THREE.Group();
-    const hasFileNormals = normals && normals.length > 0;
-
-    // Process each group separately to respect per-group culling settings
-    for (let groupIdx = 0; groupIdx < groups.length; groupIdx++) {
-        const group = groups[groupIdx];
-        const hundret = hundrets[groupIdx];
-        const isTextured = group.texFlag === 1 && textures.length > 0 && group.texID < textures.length && textures[group.texID];
-
-        const positions = [];
-        const normalArray = [];
-        const uvs = [];
-        const colors = [];
-
-        // Process polygons for this group
-        for (let i = 0; i < group.numPoly; i++) {
-            const polyIdx = group.offsetPoly + i;
-            if (polyIdx >= polygons.length) continue;
-
-            const poly = polygons[polyIdx];
-            const [i0, i1, i2] = poly.vertices;
-            const vi0 = i0 + group.offsetVert;
-            const vi1 = i1 + group.offsetVert;
-            const vi2 = i2 + group.offsetVert;
-
-            if (vi0 >= vertices.length || vi1 >= vertices.length || vi2 >= vertices.length) continue;
-
-            // Positions
-            const v0 = vertices[vi0], v1 = vertices[vi1], v2 = vertices[vi2];
-            positions.push(v0.x, v0.y, v0.z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
-
-            // Normals from file (if available)
-            if (hasFileNormals && poly.normals) {
-                const [n0, n1, n2] = poly.normals;
-                const norm0 = normals[n0] || { x: 0, y: 1, z: 0 };
-                const norm1 = normals[n1] || { x: 0, y: 1, z: 0 };
-                const norm2 = normals[n2] || { x: 0, y: 1, z: 0 };
-                normalArray.push(norm0.x, norm0.y, norm0.z);
-                normalArray.push(norm1.x, norm1.y, norm1.z);
-                normalArray.push(norm2.x, norm2.y, norm2.z);
-            }
-
-            // Texture coordinates (if textured)
-            if (isTextured && texCoords.length > 0) {
-                const uv0 = texCoords[group.offsetTex + i0] || { u: 0, v: 0 };
-                const uv1 = texCoords[group.offsetTex + i1] || { u: 0, v: 0 };
-                const uv2 = texCoords[group.offsetTex + i2] || { u: 0, v: 0 };
-                uvs.push(uv0.u, uv0.v, uv1.u, uv1.v, uv2.u, uv2.v);
-            }
-
-            // Vertex colors
-            if (vertexColors.length > 0) {
-                const c0 = vertexColors[vi0] || { r: 128, g: 128, b: 128 };
-                const c1 = vertexColors[vi1] || { r: 128, g: 128, b: 128 };
-                const c2 = vertexColors[vi2] || { r: 128, g: 128, b: 128 };
-                colors.push(c0.r / 255, c0.g / 255, c0.b / 255);
-                colors.push(c1.r / 255, c1.g / 255, c1.b / 255);
-                colors.push(c2.r / 255, c2.g / 255, c2.b / 255);
-            } else {
-                const defaultColor = isTextured ? 1 : 0.6;
-                colors.push(defaultColor, defaultColor, defaultColor);
-                colors.push(defaultColor, defaultColor, defaultColor);
-                colors.push(defaultColor, defaultColor, defaultColor);
-            }
-        }
-
-        if (positions.length === 0) continue;
-
-        // Create geometry
-        let geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-
-        if (isTextured && uvs.length > 0) {
-            geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-        }
-
-        // Use file normals or compute them (merging vertices for smooth shading)
-        if (normalArray.length > 0) {
-            geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normalArray, 3));
-        } else {
-            geometry = BufferGeometryUtils.mergeVertices(geometry);
-            geometry.computeVertexNormals();
-        }
-
-        // Get material side based on hundret culling flags
-        const side = getMaterialSide(hundret, flipped, cullingEnabled);
-
-        // Use polygon offset to prevent z-fighting on overlapping coplanar polys
-        // Later groups render "on top" of earlier ones (like FF7's original painter's algorithm)
-        // Combine meshIndex (which P file) and groupIdx (which group within) for global ordering
-        const globalOrder = meshIndex * 100 + groupIdx;
-        const material = isTextured
-            ? new THREE.MeshLambertMaterial({
-                map: textures[group.texID],
-                vertexColors: true,
-                side,
-                transparent: true,
-                alphaTest: 0.1,
-                polygonOffset: true,
-                polygonOffsetFactor: 0,
-                polygonOffsetUnits: -globalOrder * 4,
-            })
-            : new THREE.MeshLambertMaterial({
-                vertexColors: true,
-                side,
-                polygonOffset: true,
-                polygonOffsetFactor: 0,
-                polygonOffsetUnits: -globalOrder * 4,
-            });
-
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.renderOrder = globalOrder; // Ensure consistent render order
-        meshGroup.add(mesh);
-    }
-
-    return meshGroup;
-}
-
-// Create textured meshes from P file (for battle locations - not flipped)
-// partIndex: global index for polygon offset to prevent z-fighting across multiple parts
-function createTexturedMeshes(pfile, textures, cullingEnabled = true, partIndex = 0) {
-    const { vertices, polygons, texCoords, vertexColors, groups, normals, hundrets } = pfile.model;
-    const meshes = [];
-    const hasFileNormals = normals && normals.length > 0;
-
-    // Process each group separately for proper culling
-    for (let groupIdx = 0; groupIdx < groups.length; groupIdx++) {
-        const group = groups[groupIdx];
-        const hundret = hundrets[groupIdx];
-        const texID = group.texID;
-
-        const positions = [];
-        const normalArray = [];
-        const colors = [];
-        const uvs = [];
-
-        for (let i = 0; i < group.numPoly; i++) {
-            const polyIdx = group.offsetPoly + i;
-            if (polyIdx >= polygons.length) continue;
-
-            const poly = polygons[polyIdx];
-            const [i0, i1, i2] = poly.vertices;
-            const vi0 = i0 + group.offsetVert;
-            const vi1 = i1 + group.offsetVert;
-            const vi2 = i2 + group.offsetVert;
-
-            if (vi0 >= vertices.length || vi1 >= vertices.length || vi2 >= vertices.length) continue;
-
-            const v0 = vertices[vi0];
-            const v1 = vertices[vi1];
-            const v2 = vertices[vi2];
-
-            // Negate Y for battle locations
-            positions.push(v0.x, -v0.y, v0.z);
-            positions.push(v1.x, -v1.y, v1.z);
-            positions.push(v2.x, -v2.y, v2.z);
-
-            // Normals from file (if available) - negate Y to match position transform
-            if (hasFileNormals && poly.normals) {
-                const [n0, n1, n2] = poly.normals;
-                const norm0 = normals[n0] || { x: 0, y: 1, z: 0 };
-                const norm1 = normals[n1] || { x: 0, y: 1, z: 0 };
-                const norm2 = normals[n2] || { x: 0, y: 1, z: 0 };
-                normalArray.push(norm0.x, -norm0.y, norm0.z);
-                normalArray.push(norm1.x, -norm1.y, norm1.z);
-                normalArray.push(norm2.x, -norm2.y, norm2.z);
-            }
-
-            // Vertex colors
-            if (vertexColors.length > 0) {
-                const c0 = vertexColors[vi0] || { r: 128, g: 128, b: 128 };
-                const c1 = vertexColors[vi1] || { r: 128, g: 128, b: 128 };
-                const c2 = vertexColors[vi2] || { r: 128, g: 128, b: 128 };
-                colors.push(c0.r / 255, c0.g / 255, c0.b / 255);
-                colors.push(c1.r / 255, c1.g / 255, c1.b / 255);
-                colors.push(c2.r / 255, c2.g / 255, c2.b / 255);
-            } else {
-                colors.push(0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6);
-            }
-
-            // Texture coordinates
-            if (texCoords.length > 0) {
-                const uv0 = texCoords[group.offsetTex + i0] || { u: 0, v: 0 };
-                const uv1 = texCoords[group.offsetTex + i1] || { u: 0, v: 0 };
-                const uv2 = texCoords[group.offsetTex + i2] || { u: 0, v: 0 };
-                uvs.push(uv0.u, uv0.v, uv1.u, uv1.v, uv2.u, uv2.v);
-            } else {
-                uvs.push(0, 0, 0, 0, 0, 0);
-            }
-        }
-
-        if (positions.length === 0) continue;
-
-        let geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-        if (uvs.length > 0) {
-            geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-        }
-
-        // Use file normals or compute them (merging vertices for smooth shading)
-        if (normalArray.length > 0) {
-            geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normalArray, 3));
-        } else {
-            geometry = BufferGeometryUtils.mergeVertices(geometry);
-            geometry.computeVertexNormals();
-        }
-
-        // Get material side based on hundret culling flags
-        const side = getMaterialSide(hundret, false, cullingEnabled);
-
-        const texture = textures[texID] || null;
-        // Use polygon offset to prevent z-fighting on overlapping coplanar polys
-        // Combine partIndex (which P file) and groupIdx (which group within) for global ordering
-        const globalOrder = partIndex * 100 + groupIdx;
-        const material = new THREE.MeshLambertMaterial({
-            map: texture,
-            vertexColors: true,
-            side,
-            transparent: texture !== null,
-            alphaTest: texture ? 0.1 : 0,
-            polygonOffset: true,
-            polygonOffsetFactor: 0,
-            polygonOffsetUnits: -globalOrder * 4,
-        });
-
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.renderOrder = globalOrder;
-        meshes.push(mesh);
-    }
-
-    return meshes;
 }
 
 function fitCameraToScene(camera, controls, boundingBox, isBattleLocation = false, groundPlaneBox = null) {
@@ -1005,8 +749,10 @@ function fitCameraToScene(camera, controls, boundingBox, isBattleLocation = fals
     camera.lookAt(orbitTarget);
 
     controls.target.copy(orbitTarget);
-    controls.minDistance = maxDim * 0.1;
-    controls.maxDistance = fullMaxDim * 10;
+    if (controls.minDistance !== undefined) {
+        controls.minDistance = maxDim * 0.1;
+        controls.maxDistance = fullMaxDim * 10;
+    }
     controls.update();
 
     // Use full scene bounds for near/far to avoid clipping distant objects

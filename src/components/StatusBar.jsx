@@ -105,7 +105,7 @@ export function StatusBar({ status, fileCount, totalSize, selectedCount, onSelec
                 </div>
                 {updateInfo.date && (
                   <div className="update-popover-date">
-                    Released: {updateInfo.date.split(' ')[0]}
+                    Released: {new Date(updateInfo.date).toLocaleDateString()}
                   </div>
                 )}
                 {updateInfo.body && (

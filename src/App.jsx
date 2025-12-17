@@ -48,6 +48,9 @@ function App() {
   const pendingSelectionIndex = useRef(null);
   const typeaheadBuffer = useRef('');
   const typeaheadTimeout = useRef(null);
+  const prevViewModeStateRef = useRef({ viewMode: 'list', hierarchyStatus: 'idle' });
+  const justLoadedHierarchyRef = useRef(false);
+  const prevExpandedNodesRef = useRef(null);
 
   // Track window width for responsive layout
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
@@ -138,6 +141,7 @@ function App() {
       hierarchyBuildRef.current = null;
       setHierarchyState({ status: 'ready', tree, error: null });
       setHierarchyProgress(null);
+      justLoadedHierarchyRef.current = true;
       setExpandedNodes(getAllParentIndices(tree));
     }).catch(err => {
       if (hierarchyBuildRef.current !== buildId) return;
@@ -269,6 +273,8 @@ function App() {
       setSelectedIndices(new Set());
       setSearchQuery('');
       setViewMode('list');
+      setQuickLookFile(null);
+      setPreviewMode('hidden');
       setStatus(`Loaded ${result.name}`);
     } catch (err) {
       setStatus(`Error: ${err.message}`);
@@ -568,6 +574,87 @@ function App() {
   useEffect(() => {
     displayFilesRef.current = displayFiles;
   }, [displayFiles]);
+
+  // Scroll to selected file when switching view modes
+  useEffect(() => {
+    const prev = prevViewModeStateRef.current;
+    const current = { viewMode, hierarchyStatus: hierarchyState.status };
+    prevViewModeStateRef.current = current;
+
+    // Detect completed view mode switch
+    let shouldScroll = false;
+
+    // Switched to list view
+    if (prev.viewMode !== 'list' && current.viewMode === 'list') {
+      shouldScroll = true;
+    }
+
+    // Switched to hierarchy AND hierarchy is now ready
+    if (current.viewMode === 'hierarchy' && current.hierarchyStatus === 'ready') {
+      if (prev.viewMode !== 'hierarchy' || prev.hierarchyStatus !== 'ready') {
+        shouldScroll = true;
+      }
+    }
+
+    if (!shouldScroll) return;
+
+    // Scroll after DOM update
+    setTimeout(() => {
+      if (!fileListRef.current) return;
+
+      const currentDisplayFiles = displayFilesRef.current;
+      if (selectedIndices.size > 0) {
+        const selectedTocIndex = [...selectedIndices][0];
+        const displayIndex = currentDisplayFiles.findIndex(f => f.tocIndex === selectedTocIndex);
+        if (displayIndex >= 0) {
+          fileListRef.current.scrollToIndex(displayIndex);
+        } else {
+          fileListRef.current.scrollToIndex(0);
+        }
+      } else {
+        fileListRef.current.scrollToIndex(0);
+      }
+    }, 0);
+  }, [viewMode, hierarchyState.status, selectedIndices]);
+
+  // Scroll to selected file when expanding/collapsing nodes in hierarchy view
+  useEffect(() => {
+    // Only in hierarchy view
+    if (viewMode !== 'hierarchy') {
+      prevExpandedNodesRef.current = expandedNodes;
+      return;
+    }
+
+    // Skip if expandedNodes didn't change
+    if (prevExpandedNodesRef.current === expandedNodes) return;
+    prevExpandedNodesRef.current = expandedNodes;
+
+    // Skip if this is the initial population after hierarchy load
+    // (the view mode switch effect handles that case)
+    if (justLoadedHierarchyRef.current) {
+      justLoadedHierarchyRef.current = false;
+      return;
+    }
+
+    // Scroll to selected file after DOM update
+    setTimeout(() => {
+      if (!fileListRef.current) return;
+
+      const currentDisplayFiles = displayFilesRef.current;
+      if (selectedIndices.size > 0) {
+        const selectedTocIndex = [...selectedIndices][0];
+        const displayIndex = currentDisplayFiles.findIndex(f => f.tocIndex === selectedTocIndex);
+        if (displayIndex >= 0) {
+          fileListRef.current.scrollToIndex(displayIndex);
+        } else {
+          // Selected file might be hidden (collapsed parent), scroll to top
+          fileListRef.current.scrollToIndex(0);
+        }
+      } else {
+        fileListRef.current.scrollToIndex(0);
+      }
+    }, 0);
+  }, [viewMode, expandedNodes, selectedIndices]);
 
   // Select a file by filename (used when clicking references in status bar)
   const handleSelectFile = useCallback((filename) => {
@@ -871,6 +958,8 @@ function App() {
       setSelectedIndices(new Set());
       setSearchQuery('');
       setViewMode('list');
+      setQuickLookFile(null);
+      setPreviewMode('hidden');
       setStatus(`Loaded ${file.name}`);
     } catch (err) {
       setStatus(`Error: ${err.message}`);

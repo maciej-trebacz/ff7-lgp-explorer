@@ -30,7 +30,7 @@ export interface FileFilter {
 
 export interface FileOpenResult {
   name: string
-  data: ArrayBuffer
+  data: Uint8Array
   path?: string // Only available in Tauri
 }
 
@@ -59,7 +59,7 @@ export async function openFile(
     const data = await fs.readFile(path)
     const name = path.split(/[/\\]/).pop() || 'archive.lgp'
 
-    return { name, data: data.buffer as ArrayBuffer, path }
+    return { name, data, path }
   } else {
     // Web: use file input
     return new Promise((resolve) => {
@@ -76,7 +76,7 @@ export async function openFile(
           resolve(null)
           return
         }
-        const data = await file.arrayBuffer()
+        const data = new Uint8Array(await file.arrayBuffer())
         resolve({ name: file.name, data })
       }
       input.click()
@@ -109,7 +109,8 @@ export async function saveFile(
     return true
   } else {
     // Web: blob download
-    const blob = new Blob([data], { type: 'application/octet-stream' })
+    const blobSource = data instanceof Uint8Array ? data.slice().buffer : data
+    const blob = new Blob([blobSource], { type: 'application/octet-stream' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -142,7 +143,8 @@ export async function extractSingleFile(
     return true
   } else {
     // Web: blob download
-    const blob = new Blob([data], {
+    const blobSource = data.slice().buffer
+    const blob = new Blob([blobSource], {
       type: mimeType || 'application/octet-stream',
     })
     const url = URL.createObjectURL(blob)

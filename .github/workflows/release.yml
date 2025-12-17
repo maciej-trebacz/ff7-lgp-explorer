@@ -77,18 +77,22 @@ jobs:
           tagName: ${{ github.event.inputs.version && format('v{0}', github.event.inputs.version) || github.ref_name }}
           releaseName: 'FF7 LGP Explorer ${{ github.event.inputs.version || github.ref_name }}'
           releaseBody: |
-            ## FF7 LGP Explorer
-
-            Download the installer for your platform below.
-
-            ### Installation
+            ### Installation instructions
             - **Windows**: Download and run the `.exe` installer
             - **macOS**: Download the `.dmg` file, open it, and drag the app to Applications
             - **Linux**: Download the `.AppImage` file, make it executable, and run it
 
             ---
-            See the [web version](https://maciej-trebacz.github.io/ff7-lgp-explorer/) if you prefer not to install.
+            You can also use the [web version](https://maciej-trebacz.github.io/ff7-lgp-explorer/) of this app if you prefer not to install.
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
-          includeUpdaterJson: true
+          includeUpdaterJson: false
+
+      - name: Upload updater.json to release
+        if: matrix.platform == 'windows-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=${{ github.event.inputs.version && format('v{0}', github.event.inputs.version) || github.ref_name }}
+          gh release upload "$TAG" updater.json --clobber

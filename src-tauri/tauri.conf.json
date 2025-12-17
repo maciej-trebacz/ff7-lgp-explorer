@@ -26,7 +26,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["appimage", "dmg", "nsis"],
     "createUpdaterArtifacts": true,
     "macOS": {
       "dmg": {
@@ -46,6 +46,12 @@
       "hardenedRuntime": true,
       "minimumSystemVersion": "10.13"
     },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper", 
+        "silent": true
+      }
+    },    
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

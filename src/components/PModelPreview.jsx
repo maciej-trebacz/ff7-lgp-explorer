@@ -1,8 +1,8 @@
-import { useEffect, useRef, useMemo } from 'react';
+import { useEffect, useRef, useMemo, useState } from 'react';
 import * as THREE from 'three';
-import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls';
-import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import { PFile } from '../pfile.ts';
+import { createMeshFromPFile, fitCameraToObject } from '../utils/pfileRenderer.js';
 import { usePersistedState } from '../utils/settings.ts';
 import './PModelPreview.css';
 
@@ -14,6 +14,7 @@ export function PModelPreview({ data }) {
     const [wireframe, setWireframe] = usePersistedState('wireframe');
     const [vertexColors, setVertexColors] = usePersistedState('vertexColors');
     const [smoothShading, setSmoothShading] = usePersistedState('smoothShading');
+    const [cullingEnabled, setCullingEnabled] = useState(false);
 
     // Parse the P file and compute stats
     const { pfile, stats, error } = useMemo(() => {
@@ -46,29 +47,55 @@ export function PModelPreview({ data }) {
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(width, height);
         renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.toneMapping = THREE.NoToneMapping;
+        renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
         container.appendChild(renderer.domElement);
 
-        // Controls - trackball style for unrestricted rotation
-        const controls = new TrackballControls(camera, renderer.domElement);
-        controls.rotateSpeed = 2.0;
-        controls.zoomSpeed = 1.2;
-        controls.panSpeed = 0.8;
+        // Controls - orbit style (no roll)
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.1;
+        controls.screenSpacePanning = true; // Shift+drag to pan
 
-        // Lighting
-        const ambientLight = new THREE.AmbientLight(0xffffff, smoothShading ? 0.4 : 0.6);
+        const lightIntensity = 5;
+
+        // FF7-style lighting setup
+        const ambientLight = new THREE.AmbientLight(0x888888, lightIntensity);
         scene.add(ambientLight);
 
-        const directionalLight = new THREE.DirectionalLight(0xffffff, smoothShading ? 0.8 : 0.8);
-        directionalLight.position.set(1, 1, 1);
-        scene.add(directionalLight);
+        // Light 1: Main light (brightest) - from front-above
+        const light1 = new THREE.DirectionalLight(0x909090, lightIntensity);
+        light1.position.set(-100, -2100, -3500).normalize();
+        scene.add(light1);
 
-        // Create mesh from P file
-        const mesh = createMeshFromPFile(pfile, vertexColors, smoothShading);
+        // Light 2: Secondary light (medium) - from right-above-back
+        const light2 = new THREE.DirectionalLight(0x888888, lightIntensity);
+        light2.position.set(1500, -1400, 2900).normalize();
+        scene.add(light2);
+
+        // Light 3: Fill light (dimmest) - from left-above-back
+        const light3 = new THREE.DirectionalLight(0x4d4d4d, lightIntensity);
+        light3.position.set(-3000, -1400, 2500).normalize();
+        scene.add(light3);
+
+        // Container for the model - flip Y and Z to match FF7 coordinate system
+        const modelContainer = new THREE.Group();
+        modelContainer.scale.y = -1;
+        modelContainer.scale.z = -1;
+        scene.add(modelContainer);
+
+        // Create mesh from P file using shared utility
+        const mesh = createMeshFromPFile(pfile, {
+            textures: [],
+            vertexColors,
+            smoothShading,
+            cullingEnabled: false, // Disabled due to Y-flip on container
+        });
         meshRef.current = mesh;
-        scene.add(mesh);
+        modelContainer.add(mesh);
 
-        // Fit camera to model
-        fitCameraToMesh(camera, controls, mesh);
+        // Fit camera to model container
+        fitCameraToObject(camera, controls, modelContainer);
 
         // Animation loop
         let animationId;
@@ -98,12 +125,16 @@ export function PModelPreview({ data }) {
                 container.removeChild(renderer.domElement);
             }
         };
-    }, [pfile, vertexColors, smoothShading]);
+    }, [pfile, vertexColors, smoothShading, cullingEnabled]);
 
-    // Update wireframe
+    // Update wireframe (traverse group children)
     useEffect(() => {
         if (meshRef.current) {
-            meshRef.current.material.wireframe = wireframe;
+            meshRef.current.traverse((child) => {
+                if (child.isMesh && child.material) {
+                    child.material.wireframe = wireframe;
+                }
+            });
         }
     }, [wireframe]);
 
@@ -144,6 +175,14 @@ export function PModelPreview({ data }) {
                     />
                     Smooth Shading
                 </label>
+                <label className="pmodel-toggle">
+                    <input
+                        type="checkbox"
+                        checked={cullingEnabled}
+                        onChange={(e) => setCullingEnabled(e.target.checked)}
+                    />
+                    Face Culling
+                </label>
                 {stats && (
                     <div className="pmodel-stats">
                         <span>{stats.vertices} verts</span>
@@ -155,114 +194,4 @@ export function PModelPreview({ data }) {
             <div className="pmodel-canvas" ref={containerRef} />
         </div>
     );
-}
-
-function createMeshFromPFile(pfile, useVertexColors, useRetroShading = true) {
-    const { vertices, polygons, vertexColors, texCoords } = pfile.model;
-
-    const positions = [];
-    const colors = [];
-    const uvs = [];
-
-    // Build triangles from polygons
-    for (const poly of polygons) {
-        const [i0, i1, i2] = poly.vertices;
-
-        // Skip invalid indices
-        if (i0 >= vertices.length || i1 >= vertices.length || i2 >= vertices.length) {
-            continue;
-        }
-
-        const v0 = vertices[i0];
-        const v1 = vertices[i1];
-        const v2 = vertices[i2];
-
-        // Add positions (FF7 uses Y-up, same as Three.js)
-        positions.push(v0.x, v0.y, v0.z);
-        positions.push(v1.x, v1.y, v1.z);
-        positions.push(v2.x, v2.y, v2.z);
-
-        // Add vertex colors
-        if (useVertexColors && vertexColors.length > 0) {
-            const c0 = vertexColors[i0] || { r: 128, g: 128, b: 128 };
-            const c1 = vertexColors[i1] || { r: 128, g: 128, b: 128 };
-            const c2 = vertexColors[i2] || { r: 128, g: 128, b: 128 };
-
-            colors.push(c0.r / 255, c0.g / 255, c0.b / 255);
-            colors.push(c1.r / 255, c1.g / 255, c1.b / 255);
-            colors.push(c2.r / 255, c2.g / 255, c2.b / 255);
-        } else {
-            // Default gray color
-            colors.push(0.6, 0.6, 0.6);
-            colors.push(0.6, 0.6, 0.6);
-            colors.push(0.6, 0.6, 0.6);
-        }
-
-        // Add UVs if available
-        if (texCoords.length > 0) {
-            const uv0 = texCoords[i0] || { u: 0, v: 0 };
-            const uv1 = texCoords[i1] || { u: 0, v: 0 };
-            const uv2 = texCoords[i2] || { u: 0, v: 0 };
-
-            uvs.push(uv0.u, uv0.v);
-            uvs.push(uv1.u, uv1.v);
-            uvs.push(uv2.u, uv2.v);
-        }
-    }
-
-    let geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-
-    if (uvs.length > 0) {
-        geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-    }
-
-    // FF7 retro shading: Gouraud shading (per-vertex lighting, interpolated)
-    // Modern shading: PBR with per-pixel lighting
-    let material;
-    if (useRetroShading) {
-        // For smooth Gouraud shading, we need indexed geometry with shared vertices
-        // mergeVertices() combines vertices at the same position so normals can be averaged
-        geometry = BufferGeometryUtils.mergeVertices(geometry);
-        geometry.computeVertexNormals();
-
-        // MeshLambertMaterial = Gouraud shading (lighting computed per-vertex, then interpolated)
-        material = new THREE.MeshLambertMaterial({
-            vertexColors: true,
-            side: THREE.DoubleSide,
-        });
-    } else {
-        // For flat shading, keep non-indexed geometry (each face has its own vertices/normals)
-        geometry.computeVertexNormals();
-        material = new THREE.MeshStandardMaterial({
-            vertexColors: true,
-            side: THREE.DoubleSide,
-            flatShading: true,
-        });
-    }
-
-    return new THREE.Mesh(geometry, material);
-}
-
-function fitCameraToMesh(camera, controls, mesh) {
-    const box = new THREE.Box3().setFromObject(mesh);
-    const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const fov = camera.fov * (Math.PI / 180);
-    let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
-    cameraZ *= 1.5; // Add some margin
-
-    camera.position.set(center.x + cameraZ * 0.5, center.y + cameraZ * 0.3, center.z + cameraZ);
-    camera.lookAt(center);
-
-    controls.target.copy(center);
-    controls.update();
-
-    // Update near/far planes based on model size
-    camera.near = maxDim / 100;
-    camera.far = maxDim * 100;
-    camera.updateProjectionMatrix();
 }
