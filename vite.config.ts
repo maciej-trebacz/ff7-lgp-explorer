@@ -9,7 +9,7 @@ export default defineConfig({
   plugins: [react()],
 
   // Only set base path for web builds (GitHub Pages)
-  base: isTauri ? '/' : '/ff7-lgp-explorer/',
+  base: isTauri ? '/' : (process.env.BASE_URL || '/ff7-lgp-explorer/'),
 
   // Tauri-specific dev server settings
   clearScreen: false,

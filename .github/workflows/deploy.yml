@@ -35,6 +35,8 @@ jobs:
         run: pnpm install
 
       - name: Build
+        env:
+          BASE_URL: ${{ env.BASE_URL || '/ff7-lgp-explorer/' }}
         run: pnpm run build
 
       - name: Setup Pages

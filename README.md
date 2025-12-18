@@ -42,6 +42,13 @@ pnpm build
 - [TanStack Virtual](https://tanstack.com/virtual) — Virtualized lists for large archives
 - [binary-parser](https://github.com/nickelullu/node-binary-parser) — Binary format parsing
 
+## Acknowledgements
+
+- [FF7 Wiki authors](https://wiki.ffrtt.ru/index.php/FF7) - invaluable resource for learning about FF7 internals
+- [KimeraCS](https://github.com/LaZar00/KimeraCS/tree/master) - 3d model previews were based on learnings from its code
+- Ifalna - Ficedula's original tool for viewing FF7 models, LGP Explorer uses its model database for name/animations mapping
+- ... and the whole Qhimm and FF7 community.
+
 ## License
 
 MIT
