@@ -7,6 +7,7 @@ import { QuickLook } from './components/QuickLook.jsx';
 import { formatTotalSize, getFileType, parseRSDTextureRefs } from './utils/fileTypes.ts';
 import { usePersistedState } from './utils/settings.ts';
 import { buildHierarchy, flattenHierarchy, getAllParentIndices, filterHierarchyBySearch } from './utils/hierarchy.ts';
+import { Analytics } from "@vercel/analytics/react";
 import {
   openFile,
   saveFile,
@@ -996,6 +997,7 @@ function App() {
   const breadcrumbParts = currentPath ? currentPath.split('/').filter(Boolean) : [];
 
   return (
+  <>
     <div 
       className="app"
       onDragEnter={handleDragEnter}
@@ -1161,6 +1163,8 @@ function App() {
         />
       )}
     </div>
+    <Analytics />
+  </>
   );
 }
 
