@@ -120,12 +120,20 @@ export function FieldPreview({ data }) {
 
     // Cache for decoded textures (textureID-paletteID -> ImageData)
     const textureCache = useRef(new Map());
+    // Track which field the cache belongs to (for synchronous invalidation)
+    const textureCacheFieldRef = useRef(null);
 
     // Get or create texture ImageData
     const getTextureImageData = useCallback((textureID, paletteID) => {
         if (!field) {
             console.warn('getTextureImageData called with no field');
             return null;
+        }
+
+        // Clear cache synchronously if field changed (prevents stale texture flash)
+        if (textureCacheFieldRef.current !== field) {
+            textureCache.current.clear();
+            textureCacheFieldRef.current = field;
         }
 
         const cacheKey = `${textureID}-${paletteID}`;
@@ -300,11 +308,6 @@ export function FieldPreview({ data }) {
             }
         }
     }, [field, background, dimensions, layerVisibility, showGrid, getTextureImageData, paramStates]);
-
-    // Clear texture cache when field changes
-    useEffect(() => {
-        textureCache.current.clear();
-    }, [field]);
 
     // Pan handlers
     const handleMouseDown = (e) => {
