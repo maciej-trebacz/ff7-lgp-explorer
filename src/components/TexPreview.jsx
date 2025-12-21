@@ -34,7 +34,7 @@ export function TexPreview({ data, filename }) {
   }, [data]);
 
   useEffect(() => {
-    if (!tex || showAllPalettes) return;
+    if (!tex || (showAllPalettes && tex.data.numPalettes > 1)) return;
     if (!canvasRef.current) return;
 
     const canvas = canvasRef.current;
@@ -361,7 +361,7 @@ export function TexPreview({ data, filename }) {
         </button>
       </div>
       
-      {showAllPalettes ? (
+      {showAllPalettes && numPalettes > 1 ? (
         <div className="tex-grid-container" ref={gridContainerRef}>
           <div className="tex-grid">
             {Array.from({ length: numPalettes }, (_, i) => {

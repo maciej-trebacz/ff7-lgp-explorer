@@ -27,18 +27,20 @@ function getFieldFileCached(data) {
     return fieldFile;
 }
 
-const ZOOM_LEVELS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
+const ZOOM_LEVELS = [25, 50, 75, 100, 150, 200, 300, 400];
 const LAYER_NAMES = ['Layer 0 (Base)', 'Layer 1 (Animated)', 'Layer 2 (Back)', 'Layer 3 (Front)'];
 
 export function FieldPreview({ data }) {
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
-    const [zoom, setZoom] = useState(1);
+    const [zoom, setZoom] = useState(100);
     const [layerVisibility, setLayerVisibility] = useState([true, true, true, true]);
     const [showGrid, setShowGrid] = useState(false);
     const [isPanning, setIsPanning] = useState(false);
     const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
     const [lastPanPos, setLastPanPos] = useState({ x: 0, y: 0 });
+    const [paramsDropdownOpen, setParamsDropdownOpen] = useState(false);
+    const paramsDropdownRef = useRef(null);
 
     const { field, background, dimensions, error } = useMemo(() => {
         try {
@@ -55,6 +57,66 @@ export function FieldPreview({ data }) {
             return { field: null, background: null, dimensions: null, error: err.message };
         }
     }, [data]);
+
+    // Collect unique params and which state bits are used for each
+    const { conditionalParams, paramUsedBits } = useMemo(() => {
+        if (!field || !background) return { conditionalParams: [], paramUsedBits: {} };
+        const params = new Set();
+        const usedBits = {}; // { [param]: bitmask of all state bits used by tiles }
+        for (const layer of background.layers) {
+            if (!layer.exists) continue;
+            for (const tile of layer.tiles) {
+                if (tile.param !== 0) {
+                    params.add(tile.param);
+                    usedBits[tile.param] = (usedBits[tile.param] || 0) | tile.state;
+                }
+            }
+        }
+        return {
+            conditionalParams: Array.from(params).sort((a, b) => a - b),
+            paramUsedBits: usedBits
+        };
+    }, [field, background]);
+
+    // State for param bitmasks - stores which state bits are active for each param
+    // Default is 0x00 (all bits off) so conditional tiles are hidden by default
+    const [paramBitmasks, setParamBitmasks] = useState({});
+
+    // Compute effective param bitmasks: default is 0x00, user can override
+    const paramStates = useMemo(() => {
+        const states = {};
+        for (const param of conditionalParams) {
+            // Default to 0x00 (all off), unless user has customized it
+            states[param] = paramBitmasks[param] !== undefined ? paramBitmasks[param] : 0x00;
+        }
+        return states;
+    }, [conditionalParams, paramBitmasks]);
+
+    // Reset state when data changes (new field loaded)
+    const prevDataRef = useRef(data);
+    /* eslint-disable react-hooks/set-state-in-effect */
+    useEffect(() => {
+        if (data !== prevDataRef.current) {
+            prevDataRef.current = data;
+            setParamBitmasks({});
+            setLayerVisibility([true, true, true, true]);
+        }
+    }, [data]);
+    /* eslint-enable react-hooks/set-state-in-effect */
+
+    // Close params dropdown on outside click
+    useEffect(() => {
+        if (!paramsDropdownOpen) return;
+
+        const handleClickOutside = (e) => {
+            if (paramsDropdownRef.current && !paramsDropdownRef.current.contains(e.target)) {
+                setParamsDropdownOpen(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [paramsDropdownOpen]);
 
     // Cache for decoded textures (textureID-paletteID -> ImageData)
     const textureCache = useRef(new Map());
@@ -113,9 +175,15 @@ export function FieldPreview({ data }) {
             if (!layerVisibility[layerIndex]) continue;
 
             // For tiles with conditional visibility (param != 0) on layers 1-3,
-            // only render the first state variant at each location
+            // check if the tile's state matches the user's selected bitmask for this param
             // Layer 0 ignores param/state fields according to the format spec
-            if (layerIndex !== 0 && tile.param !== 0 && tile.state !== 1) continue;
+            if (layerIndex !== 0 && tile.param !== 0) {
+                const activeBitmask = paramStates[tile.param] ?? 0xFF;
+                // Tile is visible if any of its state bits overlap with the active bitmask
+                if ((tile.state & activeBitmask) === 0) {
+                    continue;
+                }
+            }
 
             // When blending is enabled on layers 1-3, use secondary texture/coords
             // Layer 0 ignores blending flag
@@ -231,7 +299,7 @@ export function FieldPreview({ data }) {
                 ctx.stroke();
             }
         }
-    }, [field, background, dimensions, layerVisibility, showGrid, getTextureImageData]);
+    }, [field, background, dimensions, layerVisibility, showGrid, getTextureImageData, paramStates]);
 
     // Clear texture cache when field changes
     useEffect(() => {
@@ -264,11 +332,26 @@ export function FieldPreview({ data }) {
         if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
             const delta = e.deltaY > 0 ? -1 : 1;
-            const currentIndex = ZOOM_LEVELS.findIndex(z => z >= zoom);
-            const newIndex = Math.max(0, Math.min(ZOOM_LEVELS.length - 1, currentIndex + delta));
+            const currentIndex = ZOOM_LEVELS.indexOf(zoom);
+            const effectiveIndex = currentIndex === -1 ? ZOOM_LEVELS.findIndex(z => z >= zoom) : currentIndex;
+            const newIndex = Math.max(0, Math.min(ZOOM_LEVELS.length - 1, effectiveIndex + delta));
             setZoom(ZOOM_LEVELS[newIndex]);
         }
     };
+
+    const handleZoomIn = useCallback(() => {
+        const currentIndex = ZOOM_LEVELS.indexOf(zoom);
+        if (currentIndex < ZOOM_LEVELS.length - 1) {
+            setZoom(ZOOM_LEVELS[currentIndex + 1]);
+        }
+    }, [zoom]);
+
+    const handleZoomOut = useCallback(() => {
+        const currentIndex = ZOOM_LEVELS.indexOf(zoom);
+        if (currentIndex > 0) {
+            setZoom(ZOOM_LEVELS[currentIndex - 1]);
+        }
+    }, [zoom]);
 
     const toggleLayer = (index) => {
         setLayerVisibility(prev => {
@@ -278,8 +361,51 @@ export function FieldPreview({ data }) {
         });
     };
 
+    const toggleParamBit = (param, bit) => {
+        const currentMask = paramStates[param] ?? 0x00;
+        const newMask = currentMask ^ (1 << bit); // XOR to toggle the bit
+        setParamBitmasks(prev => ({
+            ...prev,
+            [param]: newMask
+        }));
+    };
+
+    const cycleParamBit = (param) => {
+        const currentMask = paramStates[param] ?? 0x00;
+        const usedBits = paramUsedBits[param] || 0;
+
+        // Find enabled bits (bits that have tiles)
+        const enabledBits = [];
+        for (let bit = 0; bit < 8; bit++) {
+            if (usedBits & (1 << bit)) {
+                enabledBits.push(bit);
+            }
+        }
+
+        if (enabledBits.length === 0) return;
+
+        // Find current active bit (the single bit that's on, if any)
+        let currentBitIndex = -1;
+        for (let i = 0; i < enabledBits.length; i++) {
+            const bit = enabledBits[i];
+            if (currentMask === (1 << bit)) {
+                currentBitIndex = i;
+                break;
+            }
+        }
+
+        // Cycle to next enabled bit
+        const nextBitIndex = (currentBitIndex + 1) % enabledBits.length;
+        const nextBit = enabledBits[nextBitIndex];
+
+        setParamBitmasks(prev => ({
+            ...prev,
+            [param]: 1 << nextBit
+        }));
+    };
+
     const resetView = () => {
-        setZoom(1);
+        setZoom(100);
         setPanOffset({ x: 0, y: 0 });
     };
 
@@ -304,54 +430,109 @@ export function FieldPreview({ data }) {
     return (
         <div className="field-preview">
             <div className="field-toolbar">
-                <div className="field-toolbar-group">
-                    <span className="field-toolbar-label">Zoom:</span>
-                    <div className="field-segmented">
-                        {ZOOM_LEVELS.map(z => (
-                            <button
-                                key={z}
-                                className={`field-segment ${zoom === z ? 'active' : ''}`}
-                                onClick={() => setZoom(z)}
-                            >
-                                {z * 100}%
-                            </button>
-                        ))}
-                    </div>
+                <div className="field-layer-selector">
+                    {layerStats.map((layer, i) => (
+                        <button
+                            key={i}
+                            className={`field-layer-btn ${layerVisibility[i] ? 'active' : ''} ${!layer.exists ? 'disabled' : ''}`}
+                            onClick={() => layer.exists && toggleLayer(i)}
+                            disabled={!layer.exists}
+                            title={`${layer.name}: ${layer.tileCount} tiles`}
+                        >
+                            L{i}
+                        </button>
+                    ))}
                 </div>
 
-                <div className="field-toolbar-group">
-                    <span className="field-toolbar-label">Layers:</span>
-                    <div className="field-segmented">
-                        {layerStats.map((layer, i) => (
-                            <button
-                                key={i}
-                                className={`field-segment ${layerVisibility[i] ? 'active' : ''} ${!layer.exists ? 'disabled' : ''}`}
-                                onClick={() => layer.exists && toggleLayer(i)}
-                                disabled={!layer.exists}
-                                title={`${layer.name}: ${layer.tileCount} tiles`}
-                            >
-                                {i}
-                            </button>
-                        ))}
+                {conditionalParams.length > 0 && (
+                    <div className="field-params-selector" ref={paramsDropdownRef}>
+                        <button
+                            className={`field-params-btn ${paramsDropdownOpen ? 'active' : ''}`}
+                            onClick={() => setParamsDropdownOpen(!paramsDropdownOpen)}
+                            title="Toggle conditional tile states"
+                        >
+                            Params
+                            <span className="field-params-arrow">▾</span>
+                        </button>
+                        {paramsDropdownOpen && (
+                            <div className="field-params-dropdown">
+                                {conditionalParams.map(param => {
+                                    const mask = paramStates[param] ?? 0x00;
+                                    const usedBits = paramUsedBits[param] || 0;
+                                    return (
+                                        <div key={param} className="field-param-row">
+                                            <span className="field-param-label">#{param}</span>
+                                            <div className="field-param-bits">
+                                                {[0, 1, 2, 3, 4, 5, 6, 7].map(bit => {
+                                                    const bitMask = 1 << bit;
+                                                    const isUsed = (usedBits & bitMask) !== 0;
+                                                    const isActive = (mask & bitMask) !== 0;
+                                                    return (
+                                                        <button
+                                                            key={bit}
+                                                            className={`field-param-bit ${isActive ? 'active' : ''} ${!isUsed ? 'disabled' : ''}`}
+                                                            onClick={() => isUsed && toggleParamBit(param, bit)}
+                                                            disabled={!isUsed}
+                                                            title={isUsed ? `Bit ${bit}: ${isActive ? 'On' : 'Off'}` : `Bit ${bit}: No tiles`}
+                                                        >
+                                                            {bit}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                            {/* Only show cycle button if there are 2+ enabled states */}
+                                            {(usedBits & (usedBits - 1)) !== 0 && (
+                                                <button
+                                                    className="field-param-cycle"
+                                                    onClick={() => cycleParamBit(param)}
+                                                    title="Cycle through states"
+                                                >
+                                                    ⟳
+                                                </button>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </div>
+                )}
+
+                <div className="field-zoom-controls">
+                    <button
+                        className="field-zoom-btn"
+                        onClick={handleZoomOut}
+                        disabled={zoom === ZOOM_LEVELS[0]}
+                        title="Zoom out"
+                    >
+                        −
+                    </button>
+                    <span className="field-zoom-level">{zoom}%</span>
+                    <button
+                        className="field-zoom-btn"
+                        onClick={handleZoomIn}
+                        disabled={zoom === ZOOM_LEVELS[ZOOM_LEVELS.length - 1]}
+                        title="Zoom in"
+                    >
+                        +
+                    </button>
                 </div>
 
-                <div className="field-toolbar-group">
-                    <button
-                        className={`field-toggle ${showGrid ? 'active' : ''}`}
-                        onClick={() => setShowGrid(!showGrid)}
-                        title="Show tile grid"
-                    >
-                        Grid
-                    </button>
-                    <button
-                        className="field-toggle"
-                        onClick={resetView}
-                        title="Reset zoom and pan"
-                    >
-                        Reset
-                    </button>
-                </div>
+                <button
+                    className={`field-toggle-btn ${showGrid ? 'active' : ''}`}
+                    onClick={() => setShowGrid(!showGrid)}
+                    title="Show tile grid"
+                >
+                    Grid
+                </button>
+
+                <button
+                    className="field-toggle-btn"
+                    onClick={resetView}
+                    title="Reset zoom and pan"
+                >
+                    Reset
+                </button>
 
                 <div className="field-toolbar-info">
                     <span>{dimensions?.width}×{dimensions?.height}</span>
@@ -371,7 +552,7 @@ export function FieldPreview({ data }) {
                 <div
                     className="field-canvas-wrapper"
                     style={{
-                        transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom})`,
+                        transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom / 100})`,
                     }}
                 >
                     <canvas

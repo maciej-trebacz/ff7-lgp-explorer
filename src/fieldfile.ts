@@ -665,6 +665,11 @@ export class FieldFile {
             if (!layer.exists) return;
 
             layer.tiles.forEach(tile => {
+                // Skip tiles with off-screen coordinates
+                if (Math.abs(tile.dstX) >= 1024 || Math.abs(tile.dstY) >= 1024) {
+                    return;
+                }
+
                 // Calculate sort key: layer 2 at back (4096), layer 0 (4095),
                 // layer 1 (variable), layer 3 at front (0)
                 let sortKey: number;
@@ -705,7 +710,14 @@ export class FieldFile {
             if (!layer.exists) return;
             // Layer 0/1 use 16x16 tiles, Layer 2/3 use 32x32 tiles
             const tileSize = (layerIndex <= 1) ? 16 : 32;
+
             for (const tile of layer.tiles) {
+                // Skip tiles with sentinel/off-screen coordinates (dstX >= 9999 or dstY >= 9999)
+                // These are used in FF7 to mark tiles as "disabled" or "don't render"
+                if (tile.dstX >= 9999 || tile.dstY >= 9999) {
+                    continue;
+                }
+
                 minX = Math.min(minX, tile.dstX);
                 minY = Math.min(minY, tile.dstY);
                 maxX = Math.max(maxX, tile.dstX + tileSize);
