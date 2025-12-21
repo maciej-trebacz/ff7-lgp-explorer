@@ -16,12 +16,15 @@
     flex-wrap: wrap;
 }
 
-.field-toolbar-info {
-    margin-left: auto;
+/* Footer info bar */
+.field-info {
     display: flex;
-    gap: 12px;
-    font-size: 12px;
+    gap: 16px;
+    padding: 8px 12px;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border);
     color: var(--text-secondary);
+    font-size: 12px;
     font-family: monospace;
 }
 
@@ -294,7 +297,7 @@
 
 .field-toggle-btn.active {
     background: var(--accent);
-    color: #fff;
+    color: #000;
     border-color: var(--accent);
 }
 
@@ -365,4 +368,87 @@
     font-family: monospace;
     max-width: 400px;
     word-break: break-word;
+}
+
+/* View mode selector */
+.field-view-selector {
+    display: flex;
+}
+
+.field-view-selector button {
+    height: 28px;
+    min-width: 40px;
+    padding: 0 8px;
+    font-size: 11px;
+    font-weight: 500;
+    border: 1px solid var(--border);
+    border-left: none;
+    border-radius: 0;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.1s, color 0.1s;
+}
+
+.field-view-selector button:first-child {
+    border-left: 1px solid var(--border);
+    border-radius: 3px 0 0 3px;
+}
+
+.field-view-selector button:last-child {
+    border-radius: 0 3px 3px 0;
+}
+
+.field-view-selector button:hover:not(.active) {
+    background: var(--row-hover);
+}
+
+.field-view-selector button.active {
+    background: var(--accent);
+    color: #000;
+}
+
+/* Walkmesh preview container */
+.walkmesh-container {
+    flex: 1;
+    width: 100%;
+    min-height: 400px;
+    background: #111;
+}
+
+.walkmesh-empty {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #111;
+    color: var(--text-secondary);
+}
+
+.walkmesh-empty-text {
+    font-size: 14px;
+}
+
+/* Walkmesh toolbar controls */
+.field-rotate-btn {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    font-size: 16px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.field-rotate-btn:hover {
+    background: var(--row-hover);
 }

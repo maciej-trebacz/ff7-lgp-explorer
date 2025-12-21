@@ -140,6 +140,48 @@ export interface BackgroundSection {
 }
 
 // ============================================================================
+// Walkmesh Section (Section 5) Types
+// ============================================================================
+
+export interface WalkmeshVertex {
+    x: number;
+    y: number;
+    z: number;
+}
+
+export interface WalkmeshTriangle {
+    vertices: [WalkmeshVertex, WalkmeshVertex, WalkmeshVertex];
+    access: [number, number, number]; // Adjacent triangle IDs (0xFFFF = blocked)
+}
+
+export interface WalkmeshSection {
+    triangleCount: number;
+    triangles: WalkmeshTriangle[];
+}
+
+// ============================================================================
+// Triggers Section (Section 8) Types - Gateways
+// ============================================================================
+
+export interface Gateway {
+    vertex1: WalkmeshVertex;
+    vertex2: WalkmeshVertex;
+    fieldId: number;
+}
+
+export interface WalkmeshBounds {
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+    minZ: number;
+    maxZ: number;
+    centerX: number;
+    centerY: number;
+    centerZ: number;
+}
+
+// ============================================================================
 // Color Conversion Utilities
 // ============================================================================
 
@@ -475,6 +517,141 @@ export function parseBackgroundSection(data: Uint8Array): BackgroundSection {
 }
 
 // ============================================================================
+// Walkmesh Section Parser
+// ============================================================================
+
+export function parseWalkmeshSection(data: Uint8Array): WalkmeshSection {
+    if (data.length < 4) {
+        return { triangleCount: 0, triangles: [] };
+    }
+
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+
+    const triangleCount = view.getUint32(0, true);
+
+    if (triangleCount === 0 || triangleCount > 10000) {
+        return { triangleCount: 0, triangles: [] };
+    }
+
+    const sectorPoolOffset = 4;
+    const accessPoolOffset = sectorPoolOffset + triangleCount * 24;
+
+    const triangles: WalkmeshTriangle[] = [];
+
+    for (let i = 0; i < triangleCount; i++) {
+        const sectorOffset = sectorPoolOffset + i * 24;
+        const accessOffset = accessPoolOffset + i * 6;
+
+        const vertices: [WalkmeshVertex, WalkmeshVertex, WalkmeshVertex] = [
+            {
+                x: view.getInt16(sectorOffset, true),
+                y: view.getInt16(sectorOffset + 2, true),
+                z: view.getInt16(sectorOffset + 4, true),
+            },
+            {
+                x: view.getInt16(sectorOffset + 8, true),
+                y: view.getInt16(sectorOffset + 10, true),
+                z: view.getInt16(sectorOffset + 12, true),
+            },
+            {
+                x: view.getInt16(sectorOffset + 16, true),
+                y: view.getInt16(sectorOffset + 18, true),
+                z: view.getInt16(sectorOffset + 20, true),
+            },
+        ];
+
+        const access: [number, number, number] = [
+            view.getUint16(accessOffset, true),
+            view.getUint16(accessOffset + 2, true),
+            view.getUint16(accessOffset + 4, true),
+        ];
+
+        triangles.push({ vertices, access });
+    }
+
+    return { triangleCount, triangles };
+}
+
+// ============================================================================
+// Triggers Section Parser (Gateways)
+// ============================================================================
+
+export function parseGateways(data: Uint8Array): Gateway[] {
+    if (data.length < 344) {
+        return [];
+    }
+
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+
+    const gateways: Gateway[] = [];
+    const gatewayOffset = 56;
+
+    for (let i = 0; i < 12; i++) {
+        const offset = gatewayOffset + i * 24;
+
+        const fieldId = view.getUint16(offset + 18, true);
+        if (fieldId === 0) continue;
+
+        const vertex1: WalkmeshVertex = {
+            x: view.getInt16(offset, true),
+            y: view.getInt16(offset + 2, true),
+            z: view.getInt16(offset + 4, true),
+        };
+
+        const vertex2: WalkmeshVertex = {
+            x: view.getInt16(offset + 6, true),
+            y: view.getInt16(offset + 8, true),
+            z: view.getInt16(offset + 10, true),
+        };
+
+        if (vertex1.x === 0 && vertex1.y === 0 && vertex2.x === 0 && vertex2.y === 0) continue;
+
+        gateways.push({ vertex1, vertex2, fieldId });
+    }
+
+    return gateways;
+}
+
+// ============================================================================
+// Walkmesh Bounds Calculator
+// ============================================================================
+
+export function calculateWalkmeshBounds(walkmesh: WalkmeshSection): WalkmeshBounds {
+    if (walkmesh.triangles.length === 0) {
+        return {
+            minX: 0, maxX: 0,
+            minY: 0, maxY: 0,
+            minZ: 0, maxZ: 0,
+            centerX: 0, centerY: 0, centerZ: 0,
+        };
+    }
+
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
+    let minZ = Infinity, maxZ = -Infinity;
+
+    for (const tri of walkmesh.triangles) {
+        for (const v of tri.vertices) {
+            minX = Math.min(minX, v.x);
+            maxX = Math.max(maxX, v.x);
+            minY = Math.min(minY, v.y);
+            maxY = Math.max(maxY, v.y);
+            minZ = Math.min(minZ, v.z);
+            maxZ = Math.max(maxZ, v.z);
+        }
+    }
+
+    return {
+        minX, maxX,
+        minY, maxY,
+        minZ, maxZ,
+        centerX: (minX + maxX) / 2,
+        centerY: (minY + maxY) / 2,
+        centerZ: (minZ + maxZ) / 2,
+    };
+}
+
+// ============================================================================
 // FieldFile Class
 // ============================================================================
 
@@ -485,6 +662,8 @@ export class FieldFile {
     // Cached parsed sections (lazy loading)
     private _paletteSection: PaletteSection | null = null;
     private _backgroundSection: BackgroundSection | null = null;
+    private _walkmeshSection: WalkmeshSection | null = null;
+    private _gateways: Gateway[] | null = null;
 
     constructor(buffer: Uint8Array) {
         // Field files have a 4-byte header with the compressed size, then LZSS data
@@ -568,6 +747,27 @@ export class FieldFile {
             this._backgroundSection = parseBackgroundSection(this.getSectionData('background'));
         }
         return this._backgroundSection;
+    }
+
+    /** Get parsed walkmesh section (lazy loaded) */
+    getWalkmeshSection(): WalkmeshSection {
+        if (!this._walkmeshSection) {
+            this._walkmeshSection = parseWalkmeshSection(this.getSectionData('walkmesh'));
+        }
+        return this._walkmeshSection;
+    }
+
+    /** Get gateways from triggers section (lazy loaded) */
+    getGateways(): Gateway[] {
+        if (!this._gateways) {
+            this._gateways = parseGateways(this.getSectionData('triggers'));
+        }
+        return this._gateways;
+    }
+
+    /** Get walkmesh bounds (convenience method) */
+    getWalkmeshBounds(): WalkmeshBounds {
+        return calculateWalkmeshBounds(this.getWalkmeshSection());
     }
 
     /**

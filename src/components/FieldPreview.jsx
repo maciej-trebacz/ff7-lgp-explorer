@@ -1,5 +1,6 @@
 import { useMemo, useRef, useEffect, useState, useCallback } from 'react';
 import { FieldFile } from '../fieldfile.ts';
+import { WalkmeshPreview } from './WalkmeshPreview.jsx';
 import './FieldPreview.css';
 
 // Simple cache for parsed FieldFile objects to avoid re-parsing
@@ -33,6 +34,7 @@ const LAYER_NAMES = ['Layer 0 (Base)', 'Layer 1 (Animated)', 'Layer 2 (Back)', '
 export function FieldPreview({ data }) {
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
+    const [viewMode, setViewMode] = useState('background'); // 'background' | 'walkmesh'
     const [zoom, setZoom] = useState(100);
     const [layerVisibility, setLayerVisibility] = useState([true, true, true, true]);
     const [showGrid, setShowGrid] = useState(false);
@@ -42,19 +44,29 @@ export function FieldPreview({ data }) {
     const [paramsDropdownOpen, setParamsDropdownOpen] = useState(false);
     const paramsDropdownRef = useRef(null);
 
-    const { field, background, dimensions, error } = useMemo(() => {
+    // Walkmesh-specific state
+    const [walkmeshWireframe, setWalkmeshWireframe] = useState(true);
+    const [walkmeshShowGateways, setWalkmeshShowGateways] = useState(true);
+    const [walkmeshRotation, setWalkmeshRotation] = useState(0);
+    const walkmeshResetRef = useRef(null);
+
+    const { field, background, dimensions, walkmesh, gateways, error } = useMemo(() => {
         try {
             const parsedField = getFieldFileCached(data);
             const bg = parsedField.getBackgroundSection();
             const dims = parsedField.getBackgroundDimensions();
+            const wm = parsedField.getWalkmeshSection();
+            const gw = parsedField.getGateways();
             return {
                 field: parsedField,
                 background: bg,
                 dimensions: dims,
+                walkmesh: wm,
+                gateways: gw,
                 error: null,
             };
         } catch (err) {
-            return { field: null, background: null, dimensions: null, error: err.message };
+            return { field: null, background: null, dimensions: null, walkmesh: null, gateways: [], error: err.message };
         }
     }, [data]);
 
@@ -100,6 +112,7 @@ export function FieldPreview({ data }) {
             prevDataRef.current = data;
             setParamBitmasks({});
             setLayerVisibility([true, true, true, true]);
+            setWalkmeshRotation(0);
         }
     }, [data]);
     /* eslint-enable react-hooks/set-state-in-effect */
@@ -307,7 +320,7 @@ export function FieldPreview({ data }) {
                 ctx.stroke();
             }
         }
-    }, [field, background, dimensions, layerVisibility, showGrid, getTextureImageData, paramStates]);
+    }, [field, background, dimensions, layerVisibility, showGrid, getTextureImageData, paramStates, viewMode]);
 
     // Pan handlers
     const handleMouseDown = (e) => {
@@ -412,6 +425,26 @@ export function FieldPreview({ data }) {
         setPanOffset({ x: 0, y: 0 });
     };
 
+    // Walkmesh controls
+    const handleWalkmeshRotateLeft = useCallback(() => {
+        setWalkmeshRotation(prev => prev + Math.PI / 4);
+    }, []);
+
+    const handleWalkmeshRotateRight = useCallback(() => {
+        setWalkmeshRotation(prev => prev - Math.PI / 4);
+    }, []);
+
+    const handleWalkmeshReset = useCallback(() => {
+        setWalkmeshRotation(0);
+        if (walkmeshResetRef.current) {
+            walkmeshResetRef.current();
+        }
+    }, []);
+
+    const handleWalkmeshResetCallback = useCallback((resetFn) => {
+        walkmeshResetRef.current = resetFn;
+    }, []);
+
     if (error) {
         return (
             <div className="field-error">
@@ -433,136 +466,230 @@ export function FieldPreview({ data }) {
     return (
         <div className="field-preview">
             <div className="field-toolbar">
-                <div className="field-layer-selector">
-                    {layerStats.map((layer, i) => (
-                        <button
-                            key={i}
-                            className={`field-layer-btn ${layerVisibility[i] ? 'active' : ''} ${!layer.exists ? 'disabled' : ''}`}
-                            onClick={() => layer.exists && toggleLayer(i)}
-                            disabled={!layer.exists}
-                            title={`${layer.name}: ${layer.tileCount} tiles`}
-                        >
-                            L{i}
-                        </button>
-                    ))}
+                {/* View mode selector */}
+                <div className="field-view-selector">
+                    <button
+                        className={viewMode === 'background' ? 'active' : ''}
+                        onClick={() => setViewMode('background')}
+                        title="Background preview"
+                    >
+                        Background
+                    </button>
+                    <button
+                        className={viewMode === 'walkmesh' ? 'active' : ''}
+                        onClick={() => setViewMode('walkmesh')}
+                        title="Walkmesh preview"
+                    >
+                        Walkmesh
+                    </button>
                 </div>
 
-                {conditionalParams.length > 0 && (
-                    <div className="field-params-selector" ref={paramsDropdownRef}>
-                        <button
-                            className={`field-params-btn ${paramsDropdownOpen ? 'active' : ''}`}
-                            onClick={() => setParamsDropdownOpen(!paramsDropdownOpen)}
-                            title="Toggle conditional tile states"
-                        >
-                            Params
-                            <span className="field-params-arrow">▾</span>
-                        </button>
-                        {paramsDropdownOpen && (
-                            <div className="field-params-dropdown">
-                                {conditionalParams.map(param => {
-                                    const mask = paramStates[param] ?? 0x00;
-                                    const usedBits = paramUsedBits[param] || 0;
-                                    return (
-                                        <div key={param} className="field-param-row">
-                                            <span className="field-param-label">#{param}</span>
-                                            <div className="field-param-bits">
-                                                {[0, 1, 2, 3, 4, 5, 6, 7].map(bit => {
-                                                    const bitMask = 1 << bit;
-                                                    const isUsed = (usedBits & bitMask) !== 0;
-                                                    const isActive = (mask & bitMask) !== 0;
-                                                    return (
+                {/* Background mode controls */}
+                {viewMode === 'background' && (
+                    <>
+                        <div className="field-layer-selector">
+                            {layerStats.map((layer, i) => (
+                                <button
+                                    key={i}
+                                    className={`field-layer-btn ${layerVisibility[i] ? 'active' : ''} ${!layer.exists ? 'disabled' : ''}`}
+                                    onClick={() => layer.exists && toggleLayer(i)}
+                                    disabled={!layer.exists}
+                                    title={`${layer.name}: ${layer.tileCount} tiles`}
+                                >
+                                    L{i}
+                                </button>
+                            ))}
+                        </div>
+
+                        {conditionalParams.length > 0 && (
+                            <div className="field-params-selector" ref={paramsDropdownRef}>
+                                <button
+                                    className={`field-params-btn ${paramsDropdownOpen ? 'active' : ''}`}
+                                    onClick={() => setParamsDropdownOpen(!paramsDropdownOpen)}
+                                    title="Toggle conditional tile states"
+                                >
+                                    Params
+                                    <span className="field-params-arrow">▾</span>
+                                </button>
+                                {paramsDropdownOpen && (
+                                    <div className="field-params-dropdown">
+                                        {conditionalParams.map(param => {
+                                            const mask = paramStates[param] ?? 0x00;
+                                            const usedBits = paramUsedBits[param] || 0;
+                                            return (
+                                                <div key={param} className="field-param-row">
+                                                    <span className="field-param-label">#{param}</span>
+                                                    <div className="field-param-bits">
+                                                        {[0, 1, 2, 3, 4, 5, 6, 7].map(bit => {
+                                                            const bitMask = 1 << bit;
+                                                            const isUsed = (usedBits & bitMask) !== 0;
+                                                            const isActive = (mask & bitMask) !== 0;
+                                                            return (
+                                                                <button
+                                                                    key={bit}
+                                                                    className={`field-param-bit ${isActive ? 'active' : ''} ${!isUsed ? 'disabled' : ''}`}
+                                                                    onClick={() => isUsed && toggleParamBit(param, bit)}
+                                                                    disabled={!isUsed}
+                                                                    title={isUsed ? `Bit ${bit}: ${isActive ? 'On' : 'Off'}` : `Bit ${bit}: No tiles`}
+                                                                >
+                                                                    {bit}
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                    {/* Only show cycle button if there are 2+ enabled states */}
+                                                    {(usedBits & (usedBits - 1)) !== 0 && (
                                                         <button
-                                                            key={bit}
-                                                            className={`field-param-bit ${isActive ? 'active' : ''} ${!isUsed ? 'disabled' : ''}`}
-                                                            onClick={() => isUsed && toggleParamBit(param, bit)}
-                                                            disabled={!isUsed}
-                                                            title={isUsed ? `Bit ${bit}: ${isActive ? 'On' : 'Off'}` : `Bit ${bit}: No tiles`}
+                                                            className="field-param-cycle"
+                                                            onClick={() => cycleParamBit(param)}
+                                                            title="Cycle through states"
                                                         >
-                                                            {bit}
+                                                            ⟳
                                                         </button>
-                                                    );
-                                                })}
-                                            </div>
-                                            {/* Only show cycle button if there are 2+ enabled states */}
-                                            {(usedBits & (usedBits - 1)) !== 0 && (
-                                                <button
-                                                    className="field-param-cycle"
-                                                    onClick={() => cycleParamBit(param)}
-                                                    title="Cycle through states"
-                                                >
-                                                    ⟳
-                                                </button>
-                                            )}
-                                        </div>
-                                    );
-                                })}
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
                             </div>
                         )}
-                    </div>
+
+                        <div className="field-zoom-controls">
+                            <button
+                                className="field-zoom-btn"
+                                onClick={handleZoomOut}
+                                disabled={zoom === ZOOM_LEVELS[0]}
+                                title="Zoom out"
+                            >
+                                −
+                            </button>
+                            <span className="field-zoom-level">{zoom}%</span>
+                            <button
+                                className="field-zoom-btn"
+                                onClick={handleZoomIn}
+                                disabled={zoom === ZOOM_LEVELS[ZOOM_LEVELS.length - 1]}
+                                title="Zoom in"
+                            >
+                                +
+                            </button>
+                        </div>
+
+                        <button
+                            className={`field-toggle-btn ${showGrid ? 'active' : ''}`}
+                            onClick={() => setShowGrid(!showGrid)}
+                            title="Show tile grid"
+                        >
+                            Grid
+                        </button>
+
+                        <button
+                            className="field-toggle-btn"
+                            onClick={resetView}
+                            title="Reset zoom and pan"
+                        >
+                            Reset
+                        </button>
+
+                    </>
                 )}
 
-                <div className="field-zoom-controls">
-                    <button
-                        className="field-zoom-btn"
-                        onClick={handleZoomOut}
-                        disabled={zoom === ZOOM_LEVELS[0]}
-                        title="Zoom out"
-                    >
-                        −
-                    </button>
-                    <span className="field-zoom-level">{zoom}%</span>
-                    <button
-                        className="field-zoom-btn"
-                        onClick={handleZoomIn}
-                        disabled={zoom === ZOOM_LEVELS[ZOOM_LEVELS.length - 1]}
-                        title="Zoom in"
-                    >
-                        +
-                    </button>
-                </div>
+                {/* Walkmesh mode controls */}
+                {viewMode === 'walkmesh' && (
+                    <>
+                        <button
+                            className={`field-toggle-btn ${walkmeshWireframe ? 'active' : ''}`}
+                            onClick={() => setWalkmeshWireframe(!walkmeshWireframe)}
+                            title="Toggle wireframe"
+                        >
+                            Wire
+                        </button>
 
-                <button
-                    className={`field-toggle-btn ${showGrid ? 'active' : ''}`}
-                    onClick={() => setShowGrid(!showGrid)}
-                    title="Show tile grid"
-                >
-                    Grid
-                </button>
+                        <button
+                            className={`field-toggle-btn ${walkmeshShowGateways ? 'active' : ''}`}
+                            onClick={() => setWalkmeshShowGateways(!walkmeshShowGateways)}
+                            title="Toggle gateways"
+                        >
+                            Gates
+                        </button>
 
-                <button
-                    className="field-toggle-btn"
-                    onClick={resetView}
-                    title="Reset zoom and pan"
-                >
-                    Reset
-                </button>
+                        <button
+                            className="field-rotate-btn"
+                            onClick={handleWalkmeshRotateLeft}
+                            title="Rotate left 45°"
+                        >
+                            ↺
+                        </button>
 
-                <div className="field-toolbar-info">
-                    <span>{dimensions?.width}×{dimensions?.height}</span>
-                    <span>{textureCount} textures</span>
-                </div>
+                        <button
+                            className="field-rotate-btn"
+                            onClick={handleWalkmeshRotateRight}
+                            title="Rotate right 45°"
+                        >
+                            ↻
+                        </button>
+
+                        <button
+                            className="field-toggle-btn"
+                            onClick={handleWalkmeshReset}
+                            title="Reset view"
+                        >
+                            Reset
+                        </button>
+                    </>
+                )}
             </div>
 
-            <div
-                ref={containerRef}
-                className="field-canvas-container"
-                onMouseDown={handleMouseDown}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
-                onMouseLeave={handleMouseUp}
-                onWheel={handleWheel}
-            >
+            {/* Background mode content */}
+            {viewMode === 'background' && (
                 <div
-                    className="field-canvas-wrapper"
-                    style={{
-                        transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom / 100})`,
-                    }}
+                    ref={containerRef}
+                    className="field-canvas-container"
+                    onMouseDown={handleMouseDown}
+                    onMouseMove={handleMouseMove}
+                    onMouseUp={handleMouseUp}
+                    onMouseLeave={handleMouseUp}
+                    onWheel={handleWheel}
                 >
-                    <canvas
-                        ref={canvasRef}
-                        className="field-canvas"
-                    />
+                    <div
+                        className="field-canvas-wrapper"
+                        style={{
+                            transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom / 100})`,
+                        }}
+                    >
+                        <canvas
+                            ref={canvasRef}
+                            className="field-canvas"
+                        />
+                    </div>
                 </div>
+            )}
+
+            {/* Walkmesh mode content */}
+            {viewMode === 'walkmesh' && (
+                <WalkmeshPreview
+                    walkmesh={walkmesh}
+                    gateways={gateways}
+                    wireframe={walkmeshWireframe}
+                    showGateways={walkmeshShowGateways}
+                    rotation={walkmeshRotation}
+                    onResetRequest={handleWalkmeshResetCallback}
+                />
+            )}
+
+            {/* Footer info bar */}
+            <div className="field-info">
+                {viewMode === 'background' ? (
+                    <>
+                        <span>{dimensions?.width}×{dimensions?.height}</span>
+                        <span>{textureCount} textures</span>
+                    </>
+                ) : (
+                    <>
+                        <span>{walkmesh?.triangleCount || 0} triangles</span>
+                        {gateways?.length > 0 && <span>{gateways.length} gateways</span>}
+                    </>
+                )}
             </div>
         </div>
     );
