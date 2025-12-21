@@ -16,6 +16,8 @@ export function SkeletonPreview({ data, filename, onLoadFile }) {
     const [loadedWeaponModels, setLoadedWeaponModels] = useState(null);
     const [loadedAnimationPack, setLoadedAnimationPack] = useState(null);
     const [loadingStatus, setLoadingStatus] = useState('');
+    // Track which filename the loaded data corresponds to (null = loading, string = ready)
+    const [loadedDataKey, setLoadedDataKey] = useState(null);
     const [selectedWeaponIndex, setSelectedWeaponIndex] = useState(0);
     const [cullingEnabled, setCullingEnabled] = useState(true);
     const cameraStateRef = useRef(null);
@@ -33,11 +35,6 @@ export function SkeletonPreview({ data, filename, onLoadFile }) {
         } catch (err) {
             return { skeleton: null, stats: null, relatedFiles: [], error: err.message };
         }
-    }, [data, filename]);
-
-    // Reset camera state when switching to a different model
-    useEffect(() => {
-        cameraStateRef.current = null;
     }, [data, filename]);
 
     // Load P model parts and textures for battle locations
@@ -99,9 +96,18 @@ export function SkeletonPreview({ data, filename, onLoadFile }) {
 
             setLoadedParts(parts);
             setLoadingStatus(`Loaded ${parts.length} parts, ${textures.filter(t => t).length} textures`);
+
+            // Mark data as ready for this filename
+            setLoadedDataKey(currentFilename);
         };
 
+        const currentFilename = filename;
         loadPartsAndTextures();
+
+        // Cleanup: reset loadedDataKey when dependencies change
+        return () => {
+            setLoadedDataKey(null);
+        };
     }, [skeleton, filename, onLoadFile]);
 
     // Load bone models, textures, and animation for character/enemy models
@@ -216,9 +222,18 @@ export function SkeletonPreview({ data, filename, onLoadFile }) {
             const loadedCount = boneModels.filter(b => b.pfile).length;
             const weaponCount = weaponModels.filter(w => w.pfile).length;
             setLoadingStatus(`Loaded ${loadedCount} bone models, ${weaponCount} weapons, ${textures.filter(t => t).length} textures`);
+
+            // Mark data as ready for this filename
+            setLoadedDataKey(currentFilename);
         };
 
+        const currentFilename = filename;
         loadBoneData();
+
+        // Cleanup: reset loadedDataKey when dependencies change (before next effect runs)
+        return () => {
+            setLoadedDataKey(null);
+        };
     }, [skeleton, filename, onLoadFile]);
 
     // Initialize Three.js scene
@@ -228,10 +243,10 @@ export function SkeletonPreview({ data, filename, onLoadFile }) {
         const hasBones = skeleton.model.bones.length > 0;
         const isBattleLocation = skeleton.model.isBattleLocation;
 
+        // Wait for data to be loaded AND match the current filename to avoid glitches
+        if (loadedDataKey !== filename) return;
         // For battle locations, wait for parts to load
         if (isBattleLocation && !loadedParts) return;
-        // For bone skeletons, wait for bone models to load
-        if (!isBattleLocation && hasBones && !loadedBoneModels) return;
         // For bone skeletons with no bones, nothing to show
         if (!isBattleLocation && !hasBones) return;
 
@@ -326,8 +341,8 @@ export function SkeletonPreview({ data, filename, onLoadFile }) {
 
         // Position model so feet are at y=0 and fit camera
         if (!boundingBox.isEmpty()) {
-            // Restore camera state if available (e.g., when switching weapons)
-            if (cameraStateRef.current) {
+            // Restore camera state only if it's for the same model (e.g., when switching weapons)
+            if (cameraStateRef.current && cameraStateRef.current.filename === filename) {
                 camera.position.copy(cameraStateRef.current.position);
                 controls.target.copy(cameraStateRef.current.target);
                 camera.near = cameraStateRef.current.near;
@@ -359,8 +374,9 @@ export function SkeletonPreview({ data, filename, onLoadFile }) {
         window.addEventListener('resize', handleResize);
 
         return () => {
-            // Save camera state before cleanup for restoration on re-render
+            // Save camera state before cleanup for restoration on re-render of same model
             cameraStateRef.current = {
+                filename,
                 position: camera.position.clone(),
                 target: controls.target.clone(),
                 near: camera.near,
@@ -397,7 +413,7 @@ export function SkeletonPreview({ data, filename, onLoadFile }) {
                 container.removeChild(renderer.domElement);
             }
         };
-    }, [skeleton, loadedParts, loadedTextures, loadedBoneModels, loadedWeaponModels, loadedAnimationPack, selectedWeaponIndex, cullingEnabled]);
+    }, [skeleton, filename, loadedParts, loadedTextures, loadedBoneModels, loadedWeaponModels, loadedAnimationPack, selectedWeaponIndex, cullingEnabled, loadedDataKey]);
 
     if (error) {
         return (
@@ -411,19 +427,25 @@ export function SkeletonPreview({ data, filename, onLoadFile }) {
 
     const hasBones = skeleton && skeleton.model.bones.length > 0;
     const isBattleLocation = skeleton && skeleton.model.isBattleLocation;
-    const showCanvas = (isBattleLocation && loadedParts && loadedParts.length > 0) ||
-                       (!isBattleLocation && hasBones && loadedBoneModels);
-    const isLoading = (isBattleLocation && !loadedParts) ||
-                      (!isBattleLocation && hasBones && !loadedBoneModels);
+    // Only show canvas when loaded data matches current filename (applies to both battle locations and characters)
+    const dataReadyForCurrentFile = loadedDataKey === filename;
+    const showCanvas = dataReadyForCurrentFile && (
+        (isBattleLocation && loadedParts && loadedParts.length > 0) ||
+        (!isBattleLocation && hasBones)
+    );
+    const isLoading = !dataReadyForCurrentFile && (
+        isBattleLocation ||
+        (!isBattleLocation && hasBones)
+    );
 
     return (
         <div className="skeleton-preview">
             {showCanvas ? (
                 <div className="skeleton-3d-view" ref={containerRef} />
             ) : isLoading ? (
-                <div className="skeleton-no-hierarchy">
-                    <div className="no-hierarchy-text">Loading...</div>
-                    <div className="no-hierarchy-detail">{loadingStatus}</div>
+                <div className="skeleton-loading">
+                    {/* <div className="loading-text">Loading...</div>
+                    <div className="loading-detail">{loadingStatus}</div> */}
                 </div>
             ) : isBattleLocation && (!onLoadFile || (loadedParts && loadedParts.length === 0)) ? (
                 <div className="skeleton-no-hierarchy">

@@ -37,42 +37,50 @@ export function HexViewer({ data, columns, onColumnsChange, onPlaintextWidthChan
     setViewType(isLikelyText ? 'Plaintext' : 'Hex');
   }, [data, isLikelyText]);
 
-  const rows = useMemo(() => {
-    const result = [];
-    for (let i = 0; i < data.length; i += columns) {
-      result.push({
-        offset: i,
-        bytes: data.slice(i, Math.min(i + columns, data.length))
-      });
-    }
-    return result;
-  }, [data, columns]);
+  // Only compute row count, not actual row data (avoid O(n) slice calls upfront)
+  const rowCount = useMemo(() => Math.ceil(data.length / columns), [data.length, columns]);
 
+  // Lazily compute plaintext content only when in Plaintext view mode
+  // Also check isLikelyText to avoid computing on binary files during the render
+  // before the useEffect resets viewType
   const plaintextContent = useMemo(() => {
-    let text = '';
+    if (viewType !== 'Plaintext' || !isLikelyText) return '';
+
+    // Use array and join for O(n) instead of O(n²) string concatenation
+    const chars = new Array(data.length);
+    let j = 0;
     for (let i = 0; i < data.length; i++) {
       const byte = data[i];
       if (byte >= 32 && byte < 127) {
-        text += String.fromCharCode(byte);
+        chars[j++] = String.fromCharCode(byte);
       } else if (byte === 13 && data[i + 1] === 10) {
         // CRLF (0D 0A) - treat as single line break
-        text += '\n';
+        chars[j++] = '\n';
         i++;
       } else if (byte === 10 || byte === 13) {
-        text += '\n';
+        chars[j++] = '\n';
       } else {
-        text += '.';
+        chars[j++] = '.';
       }
     }
-    return text;
-  }, [data]);
+    return chars.slice(0, j).join('');
+  }, [data, viewType, isLikelyText]);
 
   const virtualizer = useVirtualizer({
-    count: rows.length,
+    count: rowCount,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 20,
     overscan: 50,
   });
+
+  // Compute row data on-demand for a given index (avoids pre-computing all rows)
+  const getRowData = (index) => {
+    const offset = index * columns;
+    return {
+      offset,
+      bytes: data.subarray(offset, Math.min(offset + columns, data.length))
+    };
+  };
 
   const formatOffset = (offset) => {
     return offset.toString(16).toUpperCase().padStart(8, '0');
@@ -187,7 +195,7 @@ export function HexViewer({ data, columns, onColumnsChange, onPlaintextWidthChan
               }}
             >
               {virtualizer.getVirtualItems().map((virtualRow) => {
-                const row = rows[virtualRow.index];
+                const row = getRowData(virtualRow.index);
                 return (
                   <div
                     key={virtualRow.key}

@@ -119,12 +119,17 @@ export class LGP {
     archive: LGPArchive;
     data: Uint8Array;
     modified: {[key: string]: Uint8Array} = {};
+    private tocLookup: Map<string, TOCEntry> = new Map();
 
     constructor(data: ArrayBuffer | Uint8Array) {
         this.data = data instanceof Uint8Array ? data : new Uint8Array(data);
         this.archive = lgpParser.parse(this.data);
         if (this.archive.magic !== DEFAULT_MAGIC) {
             throw Error("Invalid LGP header: expected " + DEFAULT_MAGIC + ", got " + this.archive.magic);
+        }
+        // Build lookup map for O(1) file access
+        for (const entry of this.archive.toc) {
+            this.tocLookup.set(entry.filename.toLowerCase(), entry);
         }
     }
 
@@ -193,19 +198,18 @@ export class LGP {
 
     getFile(name: string): Uint8Array | null {
         const nameLower = name.toLowerCase();
-        const entry = this.archive.toc.find(item => item.filename.toLowerCase() === nameLower);
+        const entry = this.tocLookup.get(nameLower);
         if (!entry) return null;
         if (this.modified[entry.filename]) return this.modified[entry.filename];
 
-        const out = new Uint8Array(entry.filesize);
         const offset = entry.offset + FILE_HEADER_SIZE;
-        out.set(this.data.slice(offset, offset + entry.filesize));
-        return out;
+        // Return a view into the original data instead of copying
+        return this.data.subarray(offset, offset + entry.filesize);
     }
 
     setFile(name: string, data: Uint8Array): boolean {
         const nameLower = name.toLowerCase();
-        const entry = this.archive.toc.find(item => item.filename.toLowerCase() === nameLower);
+        const entry = this.tocLookup.get(nameLower);
         if (!entry) return false;
         entry.filesize = data.length;
         this.modified[entry.filename] = data;

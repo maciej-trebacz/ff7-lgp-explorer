@@ -10,7 +10,7 @@
     flex: 1;
     min-width: 350px;
     min-height: 350px;
-    background: #1a1a2e;
+    background: #000;
     border-radius: 4px;
 }
 
@@ -175,7 +175,7 @@
     flex: 1;
     min-width: 350px;
     min-height: 350px;
-    background: #1a1a2e;
+    background: #000;
     border-radius: 4px;
     display: flex;
     flex-direction: column;
@@ -183,6 +183,31 @@
     justify-content: center;
     text-align: center;
     gap: 8px;
+}
+
+.skeleton-loading {
+    flex: 1;
+    min-width: 350px;
+    min-height: 350px;
+    background: #000;
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 8px;
+}
+
+.loading-text {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text-muted, #888);
+}
+
+.loading-detail {
+    font-size: 12px;
+    color: var(--text-muted, #666);
 }
 
 .no-hierarchy-icon {

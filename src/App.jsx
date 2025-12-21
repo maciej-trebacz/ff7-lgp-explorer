@@ -86,8 +86,8 @@ function App() {
 
   // Build folder structure and file list from archive
   // archiveVersion is used to trigger re-computation when archive is modified
-  const { folders, files, totalSize } = useMemo(() => {
-    if (!lgp) return { folders: new Map(), files: [], totalSize: 0 };
+  const { folders, files, filesByTocIndex, totalSize } = useMemo(() => {
+    if (!lgp) return { folders: new Map(), files: [], filesByTocIndex: new Map(), totalSize: 0 };
     void archiveVersion; // Use archiveVersion to trigger re-computation
 
     const folderMap = new Map();
@@ -138,7 +138,13 @@ function App() {
       });
     });
 
-    return { folders: folderMap, files: fileList, totalSize: total };
+    // Create a lookup map for O(1) access by tocIndex
+    const filesByTocIndex = new Map();
+    for (const file of fileList) {
+      filesByTocIndex.set(file.tocIndex, file);
+    }
+
+    return { folders: folderMap, files: fileList, filesByTocIndex, totalSize: total };
   }, [lgp, archiveVersion]);
 
   // Build hierarchy when switching to hierarchy view
@@ -461,16 +467,16 @@ function App() {
   const handleSelect = useCallback((index, modifiers) => {
     setSelectedIndices(prev => {
       const next = new Set();
-      
+
       if (modifiers.shift && lastSelectedIndex.current !== null) {
         // Range select - select from anchor to clicked item
         const visibleIndices = displayFiles
           .filter(f => !f.isFolder)
           .map(f => f.tocIndex);
-        
+
         const startPos = visibleIndices.indexOf(lastSelectedIndex.current);
         const endPos = visibleIndices.indexOf(index);
-        
+
         if (startPos !== -1 && endPos !== -1) {
           const rangeStart = Math.min(startPos, endPos);
           const rangeEnd = Math.max(startPos, endPos);
@@ -492,7 +498,7 @@ function App() {
         // Single select
         next.add(index);
       }
-      
+
       lastSelectedIndex.current = index;
       return next;
     });
@@ -757,7 +763,7 @@ function App() {
     if (selectedIndices.size === 0) return;
 
     const selectedIndex = [...selectedIndices].pop();
-    const file = files.find(f => f.tocIndex === selectedIndex);
+    const file = filesByTocIndex.get(selectedIndex);
     if (!file) return;
 
     // Don't reload if it's the same file
@@ -770,7 +776,7 @@ function App() {
         setQuickLookFile({ filename: file.filename, data });
       });
     }
-  }, [effectivePreviewMode, selectedIndices, files, lgp, quickLookFile?.filename]);
+  }, [effectivePreviewMode, selectedIndices, filesByTocIndex, lgp, quickLookFile?.filename]);
 
   // Keyboard handling for QuickLook and navigation
   useEffect(() => {
