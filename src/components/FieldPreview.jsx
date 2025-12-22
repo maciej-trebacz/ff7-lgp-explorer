@@ -57,6 +57,7 @@ export function FieldPreview({ data }) {
     // Walkmesh-specific state
     const [walkmeshWireframe, setWalkmeshWireframe] = useState(true);
     const [walkmeshShowGateways, setWalkmeshShowGateways] = useState(true);
+    const [walkmeshShowTriangleIds, setWalkmeshShowTriangleIds] = useState(false);
     const [walkmeshRotation, setWalkmeshRotation] = useState(0);
     const walkmeshResetRef = useRef(null);
 
@@ -622,6 +623,14 @@ export function FieldPreview({ data }) {
                         </button>
 
                         <button
+                            className={`field-toggle-btn ${walkmeshShowTriangleIds ? 'active' : ''}`}
+                            onClick={() => setWalkmeshShowTriangleIds(!walkmeshShowTriangleIds)}
+                            title="Toggle triangle IDs"
+                        >
+                            IDs
+                        </button>
+
+                        <button
                             className="field-rotate-btn"
                             onClick={handleWalkmeshRotateLeft}
                             title="Rotate left 45°"
@@ -680,6 +689,7 @@ export function FieldPreview({ data }) {
                     gateways={gateways}
                     wireframe={walkmeshWireframe}
                     showGateways={walkmeshShowGateways}
+                    showTriangleIds={walkmeshShowTriangleIds}
                     rotation={walkmeshRotation}
                     onResetRequest={handleWalkmeshResetCallback}
                 />

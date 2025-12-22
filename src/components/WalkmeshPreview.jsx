@@ -5,7 +5,41 @@ import { calculateWalkmeshBounds } from '../fieldfile.ts';
 
 const CAMERA_HEIGHT = 10000;
 
-export function WalkmeshPreview({ walkmesh, gateways, wireframe, showGateways, rotation, onResetRequest }) {
+// Create a canvas texture for a triangle ID label
+function createTextSprite(text) {
+    const canvas = document.createElement('canvas');
+    const size = 64;
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+
+    // Draw text
+    ctx.font = 'bold 32px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#b0d0ff';
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 3;
+    ctx.strokeText(text, size / 2, size / 2);
+    ctx.fillText(text, size / 2, size / 2);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+
+    const material = new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+    });
+
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(40, 40, 1);
+
+    return sprite;
+}
+
+export function WalkmeshPreview({ walkmesh, gateways, wireframe, showGateways, showTriangleIds, rotation, onResetRequest }) {
     const containerRef = useRef(null);
     const sceneRef = useRef(null);
     const cameraRef = useRef(null);
@@ -13,6 +47,7 @@ export function WalkmeshPreview({ walkmesh, gateways, wireframe, showGateways, r
     const rendererRef = useRef(null);
     const meshGroupRef = useRef(null);
     const resetFnRef = useRef(null);
+    const triangleSpritesRef = useRef([]);
 
     // Calculate dimensions
     const dimensions = useMemo(() => {
@@ -275,6 +310,25 @@ export function WalkmeshPreview({ walkmesh, gateways, wireframe, showGateways, r
             innerGroup.add(gatewayLines);
         }
 
+        // Triangle IDs
+        triangleSpritesRef.current = [];
+        if (showTriangleIds && walkmesh) {
+            for (let i = 0; i < walkmesh.triangles.length; i++) {
+                const triangle = walkmesh.triangles[i];
+                const v = triangle.vertices;
+
+                // Calculate centroid
+                const cx = (v[0].x + v[1].x + v[2].x) / 3;
+                const cy = (v[0].z + v[1].z + v[2].z) / 3;
+                const cz = -(v[0].y + v[1].y + v[2].y) / 3;
+
+                const sprite = createTextSprite(String(i));
+                sprite.position.set(cx, cy + 2, cz);
+                innerGroup.add(sprite);
+                triangleSpritesRef.current.push(sprite);
+            }
+        }
+
         // Apply rotation
         meshGroup.rotation.y = rotation;
 
@@ -344,9 +398,20 @@ export function WalkmeshPreview({ walkmesh, gateways, wireframe, showGateways, r
 
         // Animation loop
         let animationId;
+        const BASE_SPRITE_SCALE = 75;
+        const MIN_SPRITE_SCALE = 15;
+        const MAX_SPRITE_SCALE = 90;
         const animate = () => {
             animationId = requestAnimationFrame(animate);
             controls.update();
+
+            // Scale triangle ID sprites inversely with zoom, clamped to min/max bounds
+            const rawScale = BASE_SPRITE_SCALE / camera.zoom;
+            const spriteScale = Math.max(MIN_SPRITE_SCALE, Math.min(MAX_SPRITE_SCALE, rawScale));
+            for (const sprite of triangleSpritesRef.current) {
+                sprite.scale.set(spriteScale, spriteScale, 1);
+            }
+
             renderer.render(scene, camera);
         };
         animate();
@@ -375,7 +440,7 @@ export function WalkmeshPreview({ walkmesh, gateways, wireframe, showGateways, r
                 container.removeChild(renderer.domElement);
             }
         };
-    }, [geometries, gatewayGeometries, dimensions, wireframe, showGateways, rotation]);
+    }, [geometries, gatewayGeometries, dimensions, wireframe, showGateways, showTriangleIds, walkmesh, rotation]);
 
     // Handle external reset request
     useEffect(() => {
