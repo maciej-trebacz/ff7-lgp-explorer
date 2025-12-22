@@ -360,7 +360,7 @@ export async function buildBattleHierarchy(lgp: LGP, onProgress?: ProgressCallba
   return [...skeletonNodes, ...orphanFiles];
 }
 
-// Build hierarchy for magic.lgp model archives (*.d Skeleton → *.pXX, *.tXX, *.aXX)
+// Build hierarchy for magic.lgp model archives (*.d Skeleton → *.pXX, *.tXX, *.aXX + RSD → P/TEX)
 export async function buildMagicModelHierarchy(lgp: LGP, onProgress?: ProgressCallback): Promise<HierarchyNode[]> {
   const toc = lgp.archive.toc;
   const fileMap = new Map(
@@ -370,7 +370,7 @@ export async function buildMagicModelHierarchy(lgp: LGP, onProgress?: ProgressCa
   const referenced = new Set<string>();
   const skeletonNodes: HierarchyNode[] = [];
 
-  // Find all magic skeleton files (*.d pattern)
+  // Step 1: Find all magic skeleton files (*.d pattern)
   const skeletonFiles = toc.filter(e => isMagicSkeletonFile(e.filename));
 
   for (let i = 0; i < skeletonFiles.length; i++) {
@@ -425,6 +425,35 @@ export async function buildMagicModelHierarchy(lgp: LGP, onProgress?: ProgressCa
     }
   }
 
+  // Step 2: Find and parse all RSD files
+  const rsdFiles = toc.filter(e => e.filename.toLowerCase().endsWith('.rsd'));
+  const parsedRSDs = new Map<string, { rsd: RSDFile; entry: typeof toc[0] & { tocIndex: number } }>();
+
+  for (let i = 0; i < rsdFiles.length; i++) {
+    const entry = rsdFiles[i];
+    try {
+      const data = lgp.getFile(entry.filename);
+      if (data) {
+        const tocEntry = fileMap.get(entry.filename.toLowerCase())!;
+        parsedRSDs.set(entry.filename.toLowerCase(), {
+          rsd: new RSDFile(data),
+          entry: tocEntry,
+        });
+      }
+    } catch { /* skip invalid files */ }
+
+    // Yield to main thread every 20 files to keep UI responsive
+    if ((i + 1) % 20 === 0 || i === rsdFiles.length - 1) {
+      onProgress?.({
+        phase: 'rsd',
+        current: i + 1,
+        total: rsdFiles.length,
+        message: `Parsing RSD files (${i + 1}/${rsdFiles.length})`,
+      });
+      await yieldToMain();
+    }
+  }
+
   onProgress?.({
     phase: 'building',
     current: 0,
@@ -432,7 +461,52 @@ export async function buildMagicModelHierarchy(lgp: LGP, onProgress?: ProgressCa
     message: 'Building hierarchy tree...',
   });
 
-  // Find orphan files
+  // Step 3: Build RSD → P/TEX mappings
+  const rsdNodes: HierarchyNode[] = [];
+
+  for (const [filename, { rsd, entry }] of parsedRSDs) {
+    referenced.add(filename);
+
+    const node: HierarchyNode = {
+      filename: entry.filename,
+      tocIndex: entry.tocIndex,
+      filesize: entry.filesize,
+      children: [],
+    };
+
+    // Add P model
+    const pModel = rsd.getPModelFilename();
+    if (pModel) {
+      const pEntry = fileMap.get(pModel.toLowerCase());
+      if (pEntry) {
+        referenced.add(pModel.toLowerCase());
+        node.children.push({
+          filename: pEntry.filename,
+          tocIndex: pEntry.tocIndex,
+          filesize: pEntry.filesize,
+          children: [],
+        });
+      }
+    }
+
+    // Add textures
+    for (const tex of rsd.getTextureFilenames()) {
+      const texEntry = fileMap.get(tex.toLowerCase());
+      if (texEntry) {
+        referenced.add(tex.toLowerCase());
+        node.children.push({
+          filename: texEntry.filename,
+          tocIndex: texEntry.tocIndex,
+          filesize: texEntry.filesize,
+          children: [],
+        });
+      }
+    }
+
+    rsdNodes.push(node);
+  }
+
+  // Step 4: Find orphan files
   const orphanFiles: HierarchyNode[] = [];
   for (const [filename, entry] of fileMap) {
     if (!referenced.has(filename)) {
@@ -445,7 +519,7 @@ export async function buildMagicModelHierarchy(lgp: LGP, onProgress?: ProgressCa
     }
   }
 
-  return [...skeletonNodes, ...orphanFiles];
+  return [...skeletonNodes, ...rsdNodes, ...orphanFiles];
 }
 
 // Build hierarchy (auto-detect archive type)

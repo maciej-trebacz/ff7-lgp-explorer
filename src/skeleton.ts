@@ -199,6 +199,9 @@ export class SkeletonFile {
             files.push({ name: `${baseName}.a${idx}`, type: 'Animation' });
         }
 
+        // Some skeleton files have a related *.b file
+        files.push({ name: `${baseName}.b`, type: 'Unknown' });
+
         return files;
     }
 }
