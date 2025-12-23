@@ -839,7 +839,11 @@ export function WalkmeshPreview({
 
         // Animation loop
         let animationId;
-        const BASE_SPRITE_SCALE = 75;
+        // Sprite scaling constants - different for each camera mode
+        // Orthographic: camera.zoom starts at 1.0
+        // Perspective: viewState.zoom is typically 0.3-0.5 (to fit background)
+        const BASE_SPRITE_SCALE_ORTHO = 75;
+        const BASE_SPRITE_SCALE_PERSP = 20;  // Smaller because zoom values are smaller
         const MIN_SPRITE_SCALE = 15;
         const MAX_SPRITE_SCALE = 90;
         const ZOOM_LERP_FACTOR = 0.15;  // Smooth zoom interpolation speed
@@ -864,7 +868,8 @@ export function WalkmeshPreview({
             const effectiveZoom = (isPerspective && viewStateRef.current)
                 ? viewStateRef.current.zoom
                 : camera.zoom;
-            const rawScale = BASE_SPRITE_SCALE / effectiveZoom;
+            const baseScale = isPerspective ? BASE_SPRITE_SCALE_PERSP : BASE_SPRITE_SCALE_ORTHO;
+            const rawScale = baseScale / effectiveZoom;
             const spriteScale = Math.max(MIN_SPRITE_SCALE, Math.min(MAX_SPRITE_SCALE, rawScale));
             for (const sprite of triangleSpritesRef.current) {
                 sprite.scale.set(spriteScale, spriteScale, 1);
