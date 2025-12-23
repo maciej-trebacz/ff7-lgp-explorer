@@ -465,13 +465,23 @@ export function WalkmeshPreview({
                 100000
             );
 
-            // Initialize view state for pan/zoom via view offset
+            // Initialize or preserve view state for pan/zoom via view offset
             // Use container aspect for view offset dimensions and fit-to-screen calculation
             const viewportAspect = containerWidth / containerHeight;
-            viewStateRef.current = createViewState(bgWidth, bgHeight, viewportAspect);
 
-            // Apply initial view offset (centered, fit to screen)
-            applyViewState(camera, viewStateRef.current, viewportAspect);
+            // Preserve existing view state if background dimensions haven't changed
+            // This prevents view reset when toggling layers, params, gates, or IDs
+            const existingState = viewStateRef.current;
+            if (existingState &&
+                existingState.fullWidth === bgWidth &&
+                existingState.fullHeight === bgHeight) {
+                // Keep existing zoom and center, just reapply
+                applyViewState(camera, existingState, viewportAspect);
+            } else {
+                // Create fresh view state for new/different background
+                viewStateRef.current = createViewState(bgWidth, bgHeight, viewportAspect);
+                applyViewState(camera, viewStateRef.current, viewportAspect);
+            }
 
             // Use lookAt to set camera position and orientation
             camera.position.copy(ff7Cam.eye);
