@@ -13,6 +13,8 @@ FF7 LGP Explorer is a web-based tool for viewing and editing Final Fantasy 7 LGP
 - `pnpm lint` - Run ESLint
 - `pnpm preview` - Preview production build
 
+Note: Do not run the dev server unless explicitly asked to do so. The dev server is usually already running.
+
 ## Architecture
 
 ### Core Modules

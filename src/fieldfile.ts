@@ -140,6 +140,30 @@ export interface BackgroundSection {
 }
 
 // ============================================================================
+// Camera Section (Section 2) Types
+// ============================================================================
+
+export interface CameraAxisVector {
+    x: number;  // Fixed-point (divide by 4096 for float)
+    y: number;
+    z: number;
+}
+
+export interface CameraData {
+    /** 3x3 rotation matrix: X-axis (right), Y-axis (up), Z-axis (forward) */
+    axis: [CameraAxisVector, CameraAxisVector, CameraAxisVector];
+    /** Camera position in fixed-point (divide by 4096 for float) */
+    position: { x: number; y: number; z: number };
+    /** Zoom factor for FOV calculation */
+    zoom: number;
+}
+
+export interface CameraSection {
+    cameraCount: number;
+    cameras: CameraData[];
+}
+
+// ============================================================================
 // Walkmesh Section (Section 5) Types
 // ============================================================================
 
@@ -281,6 +305,85 @@ export function parsePaletteSection(data: Uint8Array): PaletteSection {
         paletteCount,
         palettes,
     };
+}
+
+// ============================================================================
+// Camera Section Parser
+// ============================================================================
+
+const CAMERA_SIZE_PC = 38;  // PC format: 38 bytes per camera
+
+export function parseCameraSection(data: Uint8Array): CameraSection {
+    if (data.length < CAMERA_SIZE_PC) {
+        return { cameraCount: 0, cameras: [] };
+    }
+
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+    const cameraCount = Math.floor(data.length / CAMERA_SIZE_PC);
+
+    const cameras: CameraData[] = [];
+
+    for (let i = 0; i < cameraCount; i++) {
+        const offset = i * CAMERA_SIZE_PC;
+
+        // 3x3 rotation matrix (9 int16 values)
+        const axis: [CameraAxisVector, CameraAxisVector, CameraAxisVector] = [
+            {
+                x: view.getInt16(offset + 0x00, true),
+                y: view.getInt16(offset + 0x02, true),
+                z: view.getInt16(offset + 0x04, true),
+            },
+            {
+                x: view.getInt16(offset + 0x06, true),
+                y: view.getInt16(offset + 0x08, true),
+                z: view.getInt16(offset + 0x0A, true),
+            },
+            {
+                x: view.getInt16(offset + 0x0C, true),
+                y: view.getInt16(offset + 0x0E, true),
+                z: view.getInt16(offset + 0x10, true),
+            },
+        ];
+
+        // 0x12-0x13: padding (copy of axis[2].z, skip)
+
+        // Camera position (3 int32 values)
+        const position = {
+            x: view.getInt32(offset + 0x14, true),
+            y: view.getInt32(offset + 0x18, true),
+            z: view.getInt32(offset + 0x1C, true),
+        };
+
+        // 0x20-0x23: blank/unused
+
+        // Camera zoom
+        const zoom = view.getUint16(offset + 0x24, true);
+
+        // 0x26-0x27: unknown/unused
+
+        cameras.push({ axis, position, zoom });
+    }
+
+    return { cameraCount, cameras };
+}
+
+/**
+ * Convert camera fixed-point value to float
+ * All camera axis and position values use 12-bit fixed-point
+ */
+export function cameraFixedToFloat(value: number): number {
+    return value / 4096.0;
+}
+
+/**
+ * Calculate vertical field of view from camera zoom
+ * FF7's camera is always designed for 320x240 viewport
+ * @param zoom Camera zoom value
+ * @returns Field of view in degrees
+ */
+export function calculateCameraFOV(zoom: number): number {
+    // 240 is FF7's native viewport height - this never changes
+    return 2 * Math.atan(240.0 / (2.0 * zoom)) * (180.0 / Math.PI);
 }
 
 // ============================================================================
@@ -660,6 +763,7 @@ export class FieldFile {
     rawData: Uint8Array;  // Decompressed data for section access
 
     // Cached parsed sections (lazy loading)
+    private _cameraSection: CameraSection | null = null;
     private _paletteSection: PaletteSection | null = null;
     private _backgroundSection: BackgroundSection | null = null;
     private _walkmeshSection: WalkmeshSection | null = null;
@@ -676,6 +780,7 @@ export class FieldFile {
         this.rawData = lzss.decompress(compressedData);
 
         this.data = this.parse(this.rawData, buffer.length);
+
     }
 
     private parse(data: Uint8Array, compressedSize: number): FieldData {
@@ -735,6 +840,14 @@ export class FieldFile {
     getSectionData(sectionName: keyof FieldData['sections']): Uint8Array {
         const section = this.data.sections[sectionName];
         return this.rawData.slice(section.dataOffset, section.dataOffset + section.length);
+    }
+
+    /** Get parsed camera section (lazy loaded) */
+    getCameraSection(): CameraSection {
+        if (!this._cameraSection) {
+            this._cameraSection = parseCameraSection(this.getSectionData('camera'));
+        }
+        return this._cameraSection;
     }
 
     /** Get parsed palette section (lazy loaded) */

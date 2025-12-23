@@ -417,6 +417,8 @@
     width: 100%;
     min-height: 400px;
     background: #111;
+    position: relative;  /* For centering the canvas in perspective mode */
+    overflow: hidden;
 }
 
 .walkmesh-empty {
@@ -432,23 +434,3 @@
     font-size: 14px;
 }
 
-/* Walkmesh toolbar controls */
-.field-rotate-btn {
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    font-size: 16px;
-    line-height: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    cursor: pointer;
-}
-
-.field-rotate-btn:hover {
-    background: var(--row-hover);
-}

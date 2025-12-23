@@ -44,7 +44,8 @@ const LAYER_NAMES = ['Layer 0 (Base)', 'Layer 1 (Animated)', 'Layer 2 (Back)', '
 export function FieldPreview({ data }) {
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
-    const [viewMode, setViewMode] = useState('background'); // 'background' | 'walkmesh'
+    const [viewMode, setViewMode] = useState('background'); // 'background' | '3d-walkmesh'
+    const [showWalkmesh, setShowWalkmesh] = useState(true); // For background mode walkmesh overlay
     const [zoom, setZoom] = useState(100);
     const [layerVisibility, setLayerVisibility] = useState([true, true, true, true]);
     const [showGrid, setShowGrid] = useState(false);
@@ -55,11 +56,13 @@ export function FieldPreview({ data }) {
     const paramsDropdownRef = useRef(null);
 
     // Walkmesh-specific state
-    const [walkmeshWireframe, setWalkmeshWireframe] = useState(true);
     const [walkmeshShowGateways, setWalkmeshShowGateways] = useState(true);
     const [walkmeshShowTriangleIds, setWalkmeshShowTriangleIds] = useState(false);
-    const [walkmeshRotation, setWalkmeshRotation] = useState(0);
+    const [walkmeshFitBackground, setWalkmeshFitBackground] = useState(false);
     const walkmeshResetRef = useRef(null);
+
+    // Track when background canvas has been rendered (used to sync with WalkmeshPreview)
+    const [backgroundRenderKey, setBackgroundRenderKey] = useState(0);
 
     const { field, background, dimensions, walkmesh, gateways, error } = useMemo(() => {
         try {
@@ -123,7 +126,6 @@ export function FieldPreview({ data }) {
             prevDataRef.current = data;
             setParamBitmasks({});
             setLayerVisibility([true, true, true, true]);
-            setWalkmeshRotation(0);
         }
     }, [data]);
     /* eslint-enable react-hooks/set-state-in-effect */
@@ -329,7 +331,11 @@ export function FieldPreview({ data }) {
                 ctx.stroke();
             }
         }
-    }, [field, background, dimensions, layerVisibility, showGrid, getTextureCanvas, paramStates, viewMode]);
+
+        // Signal that background has been rendered (for WalkmeshPreview sync)
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: triggers WalkmeshPreview to recapture canvas texture
+        setBackgroundRenderKey(k => k + 1);
+    }, [field, background, dimensions, layerVisibility, showGrid, getTextureCanvas, paramStates]);
 
     // Pan handlers
     const handleMouseDown = (e) => {
@@ -434,17 +440,13 @@ export function FieldPreview({ data }) {
         setPanOffset({ x: 0, y: 0 });
     };
 
-    // Walkmesh controls
-    const handleWalkmeshRotateLeft = useCallback(() => {
-        setWalkmeshRotation(prev => prev + Math.PI / 4);
-    }, []);
-
-    const handleWalkmeshRotateRight = useCallback(() => {
-        setWalkmeshRotation(prev => prev - Math.PI / 4);
-    }, []);
-
+    // Walkmesh controls - reset everything to initial state
     const handleWalkmeshReset = useCallback(() => {
-        setWalkmeshRotation(0);
+        // Reset layer visibility to all on
+        setLayerVisibility([true, true, true, true]);
+        // Reset param bitmasks to default (all off)
+        setParamBitmasks({});
+        // Reset the 3D view
         if (walkmeshResetRef.current) {
             walkmeshResetRef.current();
         }
@@ -480,20 +482,20 @@ export function FieldPreview({ data }) {
                     <button
                         className={viewMode === 'background' ? 'active' : ''}
                         onClick={() => setViewMode('background')}
-                        title="Background preview"
+                        title="Background with optional walkmesh overlay"
                     >
                         Background
                     </button>
                     <button
-                        className={viewMode === 'walkmesh' ? 'active' : ''}
-                        onClick={() => setViewMode('walkmesh')}
-                        title="Walkmesh preview"
+                        className={viewMode === '3d-walkmesh' ? 'active' : ''}
+                        onClick={() => setViewMode('3d-walkmesh')}
+                        title="3D walkmesh view (top-down)"
                     >
-                        Walkmesh
+                        3D Walkmesh
                     </button>
                 </div>
 
-                {/* Background mode controls */}
+                {/* Layer/Params controls - show for Background mode */}
                 {viewMode === 'background' && (
                     <>
                         <div className="field-layer-selector">
@@ -564,145 +566,121 @@ export function FieldPreview({ data }) {
                             </div>
                         )}
 
-                        <div className="field-zoom-controls">
-                            <button
-                                className="field-zoom-btn"
-                                onClick={handleZoomOut}
-                                disabled={zoom === ZOOM_LEVELS[0]}
-                                title="Zoom out"
-                            >
-                                −
-                            </button>
-                            <span className="field-zoom-level">{zoom}%</span>
-                            <button
-                                className="field-zoom-btn"
-                                onClick={handleZoomIn}
-                                disabled={zoom === ZOOM_LEVELS[ZOOM_LEVELS.length - 1]}
-                                title="Zoom in"
-                            >
-                                +
-                            </button>
-                        </div>
-
+                        {/* Walkmesh toggle */}
                         <button
-                            className={`field-toggle-btn ${showGrid ? 'active' : ''}`}
-                            onClick={() => setShowGrid(!showGrid)}
-                            title="Show tile grid"
+                            className={`field-toggle-btn ${showWalkmesh ? 'active' : ''}`}
+                            onClick={() => setShowWalkmesh(!showWalkmesh)}
+                            title={showWalkmesh ? 'Hide walkmesh overlay' : 'Show walkmesh overlay'}
                         >
-                            Grid
-                        </button>
-
-                        <button
-                            className="field-toggle-btn"
-                            onClick={resetView}
-                            title="Reset zoom and pan"
-                        >
-                            Reset
-                        </button>
-
-                    </>
-                )}
-
-                {/* Walkmesh mode controls */}
-                {viewMode === 'walkmesh' && (
-                    <>
-                        <button
-                            className={`field-toggle-btn ${walkmeshWireframe ? 'active' : ''}`}
-                            onClick={() => setWalkmeshWireframe(!walkmeshWireframe)}
-                            title="Toggle wireframe"
-                        >
-                            Wire
-                        </button>
-
-                        <button
-                            className={`field-toggle-btn ${walkmeshShowGateways ? 'active' : ''}`}
-                            onClick={() => setWalkmeshShowGateways(!walkmeshShowGateways)}
-                            title="Toggle gateways"
-                        >
-                            Gates
-                        </button>
-
-                        <button
-                            className={`field-toggle-btn ${walkmeshShowTriangleIds ? 'active' : ''}`}
-                            onClick={() => setWalkmeshShowTriangleIds(!walkmeshShowTriangleIds)}
-                            title="Toggle triangle IDs"
-                        >
-                            IDs
-                        </button>
-
-                        <button
-                            className="field-rotate-btn"
-                            onClick={handleWalkmeshRotateLeft}
-                            title="Rotate left 45°"
-                        >
-                            ↺
-                        </button>
-
-                        <button
-                            className="field-rotate-btn"
-                            onClick={handleWalkmeshRotateRight}
-                            title="Rotate right 45°"
-                        >
-                            ↻
-                        </button>
-
-                        <button
-                            className="field-toggle-btn"
-                            onClick={handleWalkmeshReset}
-                            title="Reset view"
-                        >
-                            Reset
+                            Walkmesh
                         </button>
                     </>
                 )}
+
+                {/* Gates/IDs controls - show for both modes */}
+                <button
+                    className={`field-toggle-btn ${walkmeshShowGateways ? 'active' : ''}`}
+                    onClick={() => setWalkmeshShowGateways(!walkmeshShowGateways)}
+                    disabled={viewMode === 'background' && !showWalkmesh}
+                    title="Toggle gateways"
+                >
+                    Gates
+                </button>
+
+                <button
+                    className={`field-toggle-btn ${walkmeshShowTriangleIds ? 'active' : ''}`}
+                    onClick={() => setWalkmeshShowTriangleIds(!walkmeshShowTriangleIds)}
+                    disabled={viewMode === 'background' && !showWalkmesh}
+                    title="Toggle triangle IDs"
+                >
+                    IDs
+                </button>
+
+                {/* Spacer to push Reset to the right */}
+                <div style={{ flex: 1 }} />
+
+                {/* Reset button - always on far right */}
+                <button
+                    className="field-toggle-btn"
+                    onClick={handleWalkmeshReset}
+                    title="Reset view"
+                >
+                    Reset
+                </button>
             </div>
 
-            {/* Background mode content */}
-            {viewMode === 'background' && (
+            {/* Hidden canvas for background rendering (used by WalkmeshPreview as texture) */}
+            <div
+                ref={containerRef}
+                className="field-canvas-container"
+                style={{ display: 'none' }}
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseUp}
+                onWheel={handleWheel}
+            >
                 <div
-                    ref={containerRef}
-                    className="field-canvas-container"
-                    onMouseDown={handleMouseDown}
-                    onMouseMove={handleMouseMove}
-                    onMouseUp={handleMouseUp}
-                    onMouseLeave={handleMouseUp}
-                    onWheel={handleWheel}
+                    className="field-canvas-wrapper"
+                    style={{
+                        transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom / 100})`,
+                    }}
                 >
-                    <div
-                        className="field-canvas-wrapper"
-                        style={{
-                            transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom / 100})`,
-                        }}
-                    >
-                        <canvas
-                            ref={canvasRef}
-                            className="field-canvas"
-                        />
-                    </div>
+                    <canvas
+                        ref={canvasRef}
+                        className="field-canvas"
+                    />
                 </div>
-            )}
+            </div>
 
-            {/* Walkmesh mode content */}
-            {viewMode === 'walkmesh' && (
+            {/* Background mode with optional walkmesh overlay */}
+            {viewMode === 'background' && (
                 <WalkmeshPreview
                     walkmesh={walkmesh}
                     gateways={gateways}
-                    wireframe={walkmeshWireframe}
+                    wireframe={true}
                     showGateways={walkmeshShowGateways}
                     showTriangleIds={walkmeshShowTriangleIds}
-                    rotation={walkmeshRotation}
+                    showWalkmeshOverlay={showWalkmesh}
+                    rotation={0}
                     onResetRequest={handleWalkmeshResetCallback}
+                    cameraMode="perspective"
+                    cameraData={field?.getCameraSection()?.cameras[0] || null}
+                    backgroundCanvasRef={canvasRef}
+                    backgroundDimensions={dimensions}
+                    backgroundRenderKey={backgroundRenderKey}
+                />
+            )}
+
+            {/* 3D Walkmesh mode (orthographic top-down) */}
+            {viewMode === '3d-walkmesh' && (
+                <WalkmeshPreview
+                    walkmesh={walkmesh}
+                    gateways={gateways}
+                    wireframe={true}
+                    showGateways={walkmeshShowGateways}
+                    showTriangleIds={walkmeshShowTriangleIds}
+                    showWalkmeshOverlay={true}
+                    rotation={0}
+                    onResetRequest={handleWalkmeshResetCallback}
+                    cameraMode="orthographic"
+                    cameraData={null}
+                    backgroundCanvasRef={null}
+                    backgroundDimensions={null}
+                    backgroundRenderKey={0}
                 />
             )}
 
             {/* Footer info bar */}
             <div className="field-info">
-                {viewMode === 'background' ? (
+                {viewMode === 'background' && (
                     <>
                         <span>{dimensions?.width}×{dimensions?.height}</span>
-                        <span>{textureCount} textures</span>
+                        <span>{walkmesh?.triangleCount || 0} triangles</span>
+                        {gateways?.length > 0 && <span>{gateways.length} gateways</span>}
                     </>
-                ) : (
+                )}
+                {viewMode === '3d-walkmesh' && (
                     <>
                         <span>{walkmesh?.triangleCount || 0} triangles</span>
                         {gateways?.length > 0 && <span>{gateways.length} gateways</span>}
