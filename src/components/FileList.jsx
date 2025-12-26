@@ -11,9 +11,9 @@ const ROW_HEIGHT = 32;
 function getDisplayName(filename, archiveType) {
   if (!archiveType) return null;
 
-  // Extract 4-letter code from filename (without extension)
+  // Extract 3-4 letter code from filename (without extension)
   const baseName = filename.toLowerCase().replace(/\.[^.]+$/, '');
-  if (baseName.length !== 4) return null;
+  if (baseName.length < 3 || baseName.length > 4) return null;
 
   if (archiveType === 'char') {
     return charNames[baseName] || null;
@@ -48,6 +48,7 @@ export const FileList = forwardRef(function FileList({
     const name = archiveName.toLowerCase();
     if (name === 'char.lgp') return 'char';
     if (name === 'battle.lgp') return 'battle';
+    if (name.startsWith('world_') && name.endsWith('.lgp')) return 'char';
     return null;
   }, [archiveName]);
   

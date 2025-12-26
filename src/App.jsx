@@ -24,7 +24,7 @@ import './App.css';
 function getDisplayName(filename, archiveType) {
   if (!archiveType) return null;
   const baseName = filename.toLowerCase().replace(/\.[^.]+$/, '');
-  if (baseName.length !== 4) return null;
+  if (baseName.length < 3 || baseName.length > 4) return null;
   if (archiveType === 'char') return charNames[baseName] || null;
   if (archiveType === 'battle') return battleNames[baseName] || null;
   return null;
@@ -81,6 +81,7 @@ function App() {
     const name = archiveName.toLowerCase();
     if (name === 'char.lgp') return 'char';
     if (name === 'battle.lgp') return 'battle';
+    if (name.startsWith('world_') && name.endsWith('.lgp')) return 'char';
     return null;
   }, [archiveName]);
 
