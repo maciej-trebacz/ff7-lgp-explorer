@@ -1,6 +1,10 @@
 # FF7 LGP Explorer
 
-A simple web-based archive explorer for **Final Fantasy VII** PC LGP files. Browse, preview, extract, and modify game assets directly in your browser.
+A fully featured web-based archive explorer for **Final Fantasy VII** PC LGP files. Browse, preview, extract, and modify game assets directly in your browser.
+
+<img height="180" alt="lgp-explorer-field-walkmesh" src="https://github.com/user-attachments/assets/ade9c3e5-ff0f-4812-9663-1cc8c9a36ba9" />
+<img height="180" alt="lgp-explorer-enemy-model" src="https://github.com/user-attachments/assets/be8e98e4-0b3c-4ee4-b697-1d929567c620" />
+<img height="180" alt="lgp-explorer-tex" src="https://github.com/user-attachments/assets/53a376c9-eadb-4457-9f51-46ddc0a7ed9b" />
 
 ## Features
 
