@@ -8,8 +8,16 @@ A fully featured web-based archive explorer for **Final Fantasy VII** PC LGP fil
 
 ## Features
 
-- **Browse Archives** — Navigate folder structures with a familiar file browser interface
-- **Quick Look** — Press `Space` to preview files (hex viewer for binary, image preview for TEX textures)
+- **Browse Archives** — Navigate folder structures with a familiar file browser interface, quickly find files with fuzzy search
+- **Quick Look** — Press `Space` to preview most major FF7 assets:
+  - Field level backgrounds and walkmeshes
+  - HRC skeletons (field models)
+  - Battle skeletons (battle models/locations)
+  - Magic.lgp skeletons (*.d files and related assets)
+  - Animation previews for all field and battle skeletons
+  - RSD resources / P Models
+  - TEX images (with previews for all palettes and PNG export)
+  - HEX / Plaintext view for all other files
 - **Extract Files** — Download individual files or batch extract multiple selections
 - **Modify Archives** — Replace existing files or insert new ones
 
